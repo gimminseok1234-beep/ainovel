@@ -1,0 +1,5 @@
+{
+  "name": "Remix: novelcraft",
+  "description": "An advanced AI web novel generator featuring style mimicry, POV control, and custom length settings. Powered by Google Gemini.",
+  "requestFramePermissions": []
+}
