@@ -14,7 +14,6 @@ interface CharacterCreatorProps {
   onUpdateProject: (project: Project) => void;
   onBack: () => void;
   setActiveProjectId: (id: string) => void;
-  checkApiKey: () => boolean;
 }
 
 // Helper to serialize objects back to JSON string
@@ -27,8 +26,7 @@ const CharacterCreator: React.FC<CharacterCreatorProps> = ({
   activeProjectId,
   onUpdateProject,
   onBack,
-  setActiveProjectId,
-  checkApiKey
+  setActiveProjectId
 }) => {
   const activeProject = projects.find(p => p.id === activeProjectId);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -279,7 +277,6 @@ const CharacterCreator: React.FC<CharacterCreatorProps> = ({
   // --- Generator Handlers ---
   const handleGenerate = async () => {
       if (!activeProject) return alert("프로젝트를 선택해주세요.");
-      if (!checkApiKey()) return;
       setIsGenerating(true);
       try {
           const result = await generateCharacterProfile(activeProject.worldview, genName, genRole, genExtra);

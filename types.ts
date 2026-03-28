@@ -61,13 +61,10 @@ export interface NovelSettings {
   activeStyleId?: string;
   hashtags?: string[];
   creativityLevel?: number; // 1-10
-  geminiApiKey?: string; // Added for User-provided API Key
   
   // Grok Options
   aiProvider?: 'gemini' | 'grok' | 'magnum';
-  grokApiKey?: string;
   grokModel?: string;
-  magnumApiKey?: string;
   magnumModel?: string;
   geminiModel?: string; // Added for Gemini Model Selection
   selectedModel?: string; // Unified model selection (legacy/override)
@@ -76,6 +73,7 @@ export interface NovelSettings {
   primaryModel?: string;
   manuscriptModel?: string;
   synopsisModel?: string;
+  model?: string; // Unified model selection
 
   // AI Presets
   aiPresets?: AiPreset[];
@@ -196,9 +194,8 @@ export const DEFAULT_SETTINGS: NovelSettings = {
   primaryModel: 'gemini-3-flash-preview',
   manuscriptModel: 'gemini-3-flash-preview',
   synopsisModel: 'gemini-3-flash-preview',
-  grokApiKey: '',
+  model: 'gemini-2.0-flash',
   grokModel: 'grok-3',
-  magnumApiKey: '',
   magnumModel: 'anthracite-org/magnum-v4-72b',
   aiPresets: [] // Will be populated with defaults on init
 };

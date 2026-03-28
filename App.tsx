@@ -14,7 +14,7 @@ import CharacterCreator from './components/CharacterCreator.tsx';
 import IdeaExplorer from './components/IdeaExplorer.tsx';
 import UserMenu from './components/UserMenu.tsx';
 import TrashBin from './components/TrashBin.tsx';
-import { generateNovelStep, analyzeManuscript, continueStoryStream, refineText, setGeminiApiKey } from './services/geminiService.ts';
+import { generateNovelStep, analyzeManuscript, continueStoryStream, refineText, setGlobalModel } from './services/geminiService.ts';
 import { DEFAULT_AI_PRESETS } from './services/prompts.ts';
 import { 
   subscribeToAuthChanges, 
@@ -256,9 +256,6 @@ function App() {
 
   // --- Reset Logic (Context Switching & Settings Sync) ---
   useEffect(() => {
-      // Sync API Key to Service
-      setGeminiApiKey(settings.geminiApiKey);
-
       // 1. Home Mode (No Active Project)
       if (!activeProjectId) {
           if (lastLoadedProjectId.current !== null) {
@@ -291,6 +288,7 @@ function App() {
               };
               
               setSettings(safeSettings);
+              if (safeSettings.model) setGlobalModel(safeSettings.model);
               lastLoadedProjectId.current = activeProjectId;
           }
       }
@@ -307,6 +305,7 @@ function App() {
               if (projectIndex !== -1 && JSON.stringify(activeProjects[projectIndex].settings) !== JSON.stringify(settings)) {
                   const updatedProject = { ...activeProjects[projectIndex], settings: settings };
                   saveProjectToFirestore(user.uid, updatedProject);
+                  if (settings.model) setGlobalModel(settings.model);
               }
           }
       } else {
@@ -320,6 +319,7 @@ function App() {
               if (user) {
                   saveUserGlobalSettings(user.uid, settings);
               }
+              if (settings.model) setGlobalModel(settings.model);
               
               // 3. Update local globalSettings ref to prevent loop
               setGlobalSettings(settings);
@@ -397,6 +397,7 @@ function App() {
         // 3. Start listener for Global Settings
         unsubscribeGlobalSettings = subscribeToGlobalSettings(currentUser.uid, (gSettings) => {
             setGlobalSettings(gSettings);
+            if (gSettings?.model) setGlobalModel(gSettings.model);
             // If on Home, sync settings with cloud (initial sync)
             if (!activeProjectId) {
                 // To avoid overwriting user edits in progress, maybe only do this on initial load?
@@ -543,14 +544,8 @@ function App() {
 
   // --- Handlers ---
 
-  const checkApiKey = useCallback(() => {
-    // API key is now optional, as it falls back to the default key.
-    return true;
-  }, []);
-
   const handleGenerate = useCallback(async (structuralGuide?: string, contextAnalysis?: string) => {
     if (!settings.synopsis) return;
-    if (!checkApiKey()) return;
     setIsLoading(true);
     setError(null);
     setGeneratedContent(""); 
@@ -563,8 +558,6 @@ function App() {
     const projectContext = activeProjectId ? projects.find(p => p.id === activeProjectId) || null : null;
     try {
       const model = settings.selectedModel || settings.geminiModel || 'gemini-3-flash-preview';
-      const grokOptions = { apiKey: settings.grokApiKey || '' };
-      const magnumOptions = { apiKey: settings.magnumApiKey || '' };
       
       // FIX: Use generateNovelStep with correct arguments (single shot generation: 1/1)
       await generateNovelStep(
@@ -575,9 +568,7 @@ function App() {
             setGeneratedContent((prev) => prev + chunk);
           },
           undefined, // storyAnalysis
-          model,
-          grokOptions,
-          magnumOptions
+          model
       );
     } catch (err) {
       setError("오류 발생");
@@ -609,24 +600,20 @@ function App() {
       const level = settings.creativityLevel || 3;
       const temp = 0.2 + (Math.max(1, Math.min(10, level)) - 1) * (0.7 / 9);
       const model = settings.selectedModel || settings.geminiModel || 'gemini-3-flash-preview';
-      const grokOptions = { apiKey: settings.grokApiKey || '' };
-      const magnumOptions = { apiKey: settings.magnumApiKey || '' };
       
-      await continueStoryStream(generatedContent, (chunk) => setGeneratedContent((prev) => prev + chunk), temp, model, grokOptions, magnumOptions);
+      await continueStoryStream(generatedContent, (chunk) => setGeneratedContent((prev) => prev + chunk), temp, model);
     } catch (err) { setError("오류 발생"); } finally { setIsLoading(false); }
-  }, [generatedContent, settings.creativityLevel, settings.selectedModel, settings.geminiModel, settings.grokApiKey, settings.magnumApiKey]);
+  }, [generatedContent, settings.creativityLevel, settings.selectedModel, settings.geminiModel]);
 
   const handleRefineGenContent = useCallback(async (instruction: string) => {
     if (!generatedContent) return;
     setIsLoading(true);
     try {
       const model = settings.selectedModel || settings.geminiModel || 'gemini-3-flash-preview';
-      const grokOptions = { apiKey: settings.grokApiKey || '' };
-      const magnumOptions = { apiKey: settings.magnumApiKey || '' };
-      const refined = await refineText(generatedContent, instruction, model, grokOptions, magnumOptions);
+      const refined = await refineText(generatedContent, instruction, model);
       setGeneratedContent(refined);
     } catch (e) { setError("오류 발생"); } finally { setIsLoading(false); }
-  }, [generatedContent, settings.selectedModel, settings.geminiModel, settings.grokApiKey, settings.magnumApiKey]);
+  }, [generatedContent, settings.selectedModel, settings.geminiModel]);
 
   const createProject = (name: string) => {
     const newProject: Project = { 
@@ -1039,7 +1026,6 @@ function App() {
                           lastSavedTime={lastSavedTime}
                           presets={globalSettings?.aiPresets && globalSettings.aiPresets.length > 0 ? globalSettings.aiPresets : DEFAULT_AI_PRESETS}
                           model={settings.geminiModel}
-                          grokApiKey={settings.grokApiKey}
                        />
                   )}
               </div>
@@ -1116,13 +1102,12 @@ function App() {
                   onSaveStyle={handleSaveStyle}
                   onDeleteStyle={handleDeleteStyle}
                   onOpenTrash={() => setIsTrashOpen(true)}
-                  checkApiKey={checkApiKey}
                   isSettingsOpen={isSettingsOpen}
                   setIsSettingsOpen={setIsSettingsOpen}
                 />
               );
-            case 'WORLD_BUILDER': return <WorldBuilder projects={activeProjects} stories={activeStories} activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId} onUpdateProject={updateProject} onBack={() => checkUnsavedChanges(() => { setActiveProjectId(null); setCurrentView('HOME'); })} checkApiKey={checkApiKey} />;
-            case 'CHARACTER_LAB': return <CharacterCreator projects={activeProjects} activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId} onUpdateProject={updateProject} onBack={() => checkUnsavedChanges(() => { setActiveProjectId(null); setCurrentView('HOME'); })} checkApiKey={checkApiKey} />;
+            case 'WORLD_BUILDER': return <WorldBuilder projects={activeProjects} stories={activeStories} activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId} onUpdateProject={updateProject} onBack={() => checkUnsavedChanges(() => { setActiveProjectId(null); setCurrentView('HOME'); })} />;
+            case 'CHARACTER_LAB': return <CharacterCreator projects={activeProjects} activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId} onUpdateProject={updateProject} onBack={() => checkUnsavedChanges(() => { setActiveProjectId(null); setCurrentView('HOME'); })} />;
             case 'IDEA_EXPLORER': 
                 return <IdeaExplorer 
                     projects={activeProjects} 
@@ -1135,7 +1120,6 @@ function App() {
                     onSaveStory={handleExternalSave} 
                     onBack={() => checkUnsavedChanges(() => { setActiveProjectId(null); setCurrentView('HOME'); })} 
                     onSaveStyle={handleSaveStyle} 
-                    checkApiKey={checkApiKey}
                     settings={settings}
                 />;
             case 'AI_WRITER':
@@ -1241,7 +1225,6 @@ function App() {
                       onContinue={handleContinueGenerate} onRetry={handleRetry} onReset={handleResetViewer} isExistingStory={!!editingStoryId} goHome={() => checkUnsavedChanges(() => { setActiveProjectId(null); setCurrentView('HOME'); })} lastSavedTime={lastSavedTime} editorPrefs={editorPrefs} isMobile={false}
                       presets={globalSettings?.aiPresets && globalSettings.aiPresets.length > 0 ? globalSettings.aiPresets : DEFAULT_AI_PRESETS}
                       model={settings.geminiModel}
-                      grokApiKey={settings.grokApiKey}
                     />
                   </main>
                 </div>

@@ -15,7 +15,6 @@ interface SynopsisRefinerProps {
   onUpdateProject: (project: Project) => void;
   onCreateProject: (name: string) => string | void; // New prop
   settings?: NovelSettings; // NEW PROP to access global settings including Grok model
-  checkApiKey?: () => boolean;
 }
 
 const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
@@ -27,8 +26,7 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
   onSaveCard,
   onUpdateProject,
   onCreateProject,
-  settings,
-  checkApiKey
+  settings
 }) => {
   const [selectedProjectId, setSelectedProjectId] = useState<string>(activeProjectId || '');
   const [rawSynopsis, setRawSynopsis] = useState('');
@@ -107,23 +105,7 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
       reader.onload = async (event) => {
           const text = event.target?.result as string;
           try {
-              // Prepare Grok Options
-              let grokOptions = undefined;
-              if (settings?.grokApiKey || activeProject?.settings?.grokApiKey) {
-                  grokOptions = {
-                      apiKey: settings?.grokApiKey || activeProject?.settings?.grokApiKey || ''
-                  };
-              }
-
-              // Prepare Magnum Options
-              let magnumOptions = undefined;
-              if (settings?.magnumApiKey || activeProject?.settings?.magnumApiKey) {
-                  magnumOptions = {
-                      apiKey: settings?.magnumApiKey || activeProject?.settings?.magnumApiKey || ''
-                  };
-              }
-
-              const analysis = await analyzeSynopsisReference(text, selectedModel, grokOptions, magnumOptions);
+              const analysis = await analyzeSynopsisReference(text, selectedModel);
               setReferenceAnalysis(analysis);
           } catch(e) {
               alert("참조 파일 분석 실패");
@@ -137,29 +119,12 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
 
   const handleAnalyzeContext = async () => {
       if (!activeProject) return alert("프로젝트를 선택해주세요.");
-      if (checkApiKey && !checkApiKey()) return;
       const projectStories = stories.filter(s => s.projectId === activeProject.id && s.category !== 'synopsis');
       if (projectStories.length === 0) return alert("분석할 원고가 없습니다.");
 
       setIsContextAnalyzing(true);
       try {
-          // Prepare Grok Options
-          let grokOptions = undefined;
-          if (settings?.grokApiKey || activeProject?.settings?.grokApiKey) {
-              grokOptions = {
-                  apiKey: settings?.grokApiKey || activeProject?.settings?.grokApiKey || ''
-              };
-          }
-
-          // Prepare Magnum Options
-          let magnumOptions = undefined;
-          if (settings?.magnumApiKey || activeProject?.settings?.magnumApiKey) {
-              magnumOptions = {
-                  apiKey: settings?.magnumApiKey || activeProject?.settings?.magnumApiKey || ''
-              };
-          }
-
-          const result = await analyzeProjectContext(projectStories, selectedModel, grokOptions, magnumOptions);
+          const result = await analyzeProjectContext(projectStories, selectedModel);
           if (result) {
               const lastUpdate = projectStories.length > 0 
                 ? Math.max(...projectStories.map(s => s.updatedAt || s.createdAt)) 
@@ -191,7 +156,6 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
 
   const handleAnalyzeSynopsis = async () => {
     if (!rawSynopsis.trim()) return alert("시놉시스 내용을 입력해주세요.");
-    if (checkApiKey && !checkApiKey()) return;
     
     setIsAnalyzing(true);
     try {
@@ -202,34 +166,14 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
       // Pass the cached analysis if available
       const preAnalyzedContext = activeProject?.contextAnalysis;
 
-      // Prepare Grok Options from global settings or project settings
-      let grokOptions = undefined;
-      if (settings?.grokApiKey || activeProject?.settings?.grokApiKey) {
-          grokOptions = {
-              apiKey: settings?.grokApiKey || activeProject?.settings?.grokApiKey || '',
-              model: settings?.grokModel || activeProject?.settings?.grokModel || 'grok-3'
-          };
-      }
-
-      // Prepare Magnum Options
-      let magnumOptions = undefined;
-      if (settings?.magnumApiKey || activeProject?.settings?.magnumApiKey) {
-          magnumOptions = {
-              apiKey: settings?.magnumApiKey || activeProject?.settings?.magnumApiKey || '',
-              model: settings?.magnumModel || activeProject?.settings?.magnumModel || 'anthracite-org/magnum-v4-72b'
-          };
-      }
-
       const result = await refineSynopsisWithContext(
           rawSynopsis, 
           activeProject || null, 
           recentStories, 
           preAnalyzedContext,
           "", // referenceAnalysis removed
-          grokOptions, // Pass the configured Grok options
           1, // targetChapterCount removed, default to 1
-          selectedModel, // Pass selected model
-          magnumOptions // Pass Magnum options
+          selectedModel // Pass selected model
       );
       setRefinedCards(result);
     } catch (e) {
@@ -241,32 +185,13 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
   };
 
   const handleRefineCard = async (index: number, card: RefinedSynopsisCard) => {
-    if (checkApiKey && !checkApiKey()) return;
     setIsCardRefining(index);
     try {
-      // Prepare Grok Options
-      let grokOptions = undefined;
-      if (settings?.grokApiKey || activeProject?.settings?.grokApiKey) {
-          grokOptions = {
-              apiKey: settings?.grokApiKey || activeProject?.settings?.grokApiKey || ''
-          };
-      }
-
-      // Prepare Magnum Options
-      let magnumOptions = undefined;
-      if (settings?.magnumApiKey || activeProject?.settings?.magnumApiKey) {
-          magnumOptions = {
-              apiKey: settings?.magnumApiKey || activeProject?.settings?.magnumApiKey || ''
-          };
-      }
-
       // Just refine the summary as there are no instructions anymore
       const refinedSummary = await refineText(
           card.summary, 
           "Make this summary more detailed, include sensory details, and merge any technical instructions into the narrative.",
-          selectedModel,
-          grokOptions,
-          magnumOptions
+          selectedModel
       );
       
       const newCards = [...refinedCards];

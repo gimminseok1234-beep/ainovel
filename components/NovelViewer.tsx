@@ -26,7 +26,6 @@ interface NovelViewerProps {
   isMobile?: boolean;
   presets?: AiPreset[]; // Pass presets
   model?: string;
-  grokApiKey?: string;
 }
 
 const NovelViewer: React.FC<NovelViewerProps> = ({ 
@@ -48,8 +47,7 @@ const NovelViewer: React.FC<NovelViewerProps> = ({
   editorPrefs,
   isMobile = false,
   presets = DEFAULT_AI_PRESETS,
-  model = 'gemini-3-flash-preview',
-  grokApiKey = ''
+  model = 'gemini-3-flash-preview'
 }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [isRefining, setIsRefining] = useState(false);
@@ -128,7 +126,7 @@ const NovelViewer: React.FC<NovelViewerProps> = ({
 
     setIsRefining(true);
     try {
-      const refined = await refineText(content, instruction, model, { apiKey: grokApiKey });
+      const refined = await refineText(content, instruction, model);
       
       // 2. Update Content
       setContent(refined);

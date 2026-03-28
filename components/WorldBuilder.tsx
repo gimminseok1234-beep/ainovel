@@ -14,7 +14,6 @@ interface WorldBuilderProps {
   onUpdateProject: (project: Project) => void;
   onBack: () => void;
   setActiveProjectId: (id: string) => void;
-  checkApiKey: () => boolean;
 }
 
 const WorldBuilder: React.FC<WorldBuilderProps> = ({ 
@@ -23,8 +22,7 @@ const WorldBuilder: React.FC<WorldBuilderProps> = ({
   activeProjectId, 
   onUpdateProject, 
   onBack,
-  setActiveProjectId,
-  checkApiKey
+  setActiveProjectId
 }) => {
   const activeProject = projects.find(p => p.id === activeProjectId);
   
@@ -241,7 +239,6 @@ const WorldBuilder: React.FC<WorldBuilderProps> = ({
 
   const handleRefineText = async () => {
     if(!activeNote || !refineInstruction.trim()) return;
-    if (!checkApiKey()) return;
     
     setIsRefining(true);
     try {
@@ -313,7 +310,6 @@ const WorldBuilder: React.FC<WorldBuilderProps> = ({
 
   const handleSendMessage = async () => {
     if (!inputQuery.trim() || !activeProject) return;
-    if (!checkApiKey()) return;
 
     const userMsg = inputQuery;
     setInputQuery('');

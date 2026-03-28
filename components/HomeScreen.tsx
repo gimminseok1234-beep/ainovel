@@ -42,7 +42,6 @@ interface HomeScreenProps {
   onSaveStyle?: (style: SavedStyle) => void;
   onDeleteStyle?: (id: string) => void;
   onOpenTrash?: () => void; // New Prop
-  checkApiKey?: () => boolean;
   isSettingsOpen: boolean;
   setIsSettingsOpen: (open: boolean) => void;
 }
@@ -74,7 +73,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   onSaveStyle,
   onDeleteStyle,
   onOpenTrash,
-  checkApiKey,
   isSettingsOpen,
   setIsSettingsOpen
 }) => {
@@ -582,27 +580,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
                                       <Cpu size={14} className="text-orange-400" /> Magnum (OpenRouter) 설정
                                   </h5>
                                   <p className="text-[10px] text-gray-400">
-                                      OpenRouter를 통해 Magnum v4를 사용합니다. <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer" className="text-orange-400 hover:underline">여기에서 키를 발급받으세요.</a>
+                                      OpenRouter를 통해 Magnum v4를 사용합니다.
                                   </p>
-                                  
-                                  <div>
-                                      <label className="text-xs font-medium text-gray-400 mb-1 block">Magnum API Key</label>
-                                      <div className="relative">
-                                          <input 
-                                              type="password"
-                                              className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm text-gray-200 outline-none focus:border-purple-500 pr-10"
-                                              placeholder={user ? "OpenRouter API 키 입력" : "로그인이 필요합니다"}
-                                              disabled={!user}
-                                              value={settings.magnumApiKey || ''}
-                                              onChange={(e) => handleGrokSettingChange('magnumApiKey', e.target.value)}
-                                          />
-                                          {settings.magnumApiKey && (
-                                              <div className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500">
-                                                  <CheckCircle2 size={16} />
-                                              </div>
-                                          )}
-                                      </div>
-                                  </div>
                               </div>
 
                               {/* Grok Settings */}
@@ -611,27 +590,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
                                       <Cpu size={14} className="text-red-400" /> Grok API 설정
                                   </h5>
                                   <p className="text-[10px] text-gray-400">
-                                      xAI Grok 3를 사용하려면 API 키가 필요합니다. <a href="https://console.x.ai/" target="_blank" rel="noreferrer" className="text-red-400 hover:underline">여기에서 키를 발급받으세요.</a>
+                                      xAI Grok 3를 사용합니다.
                                   </p>
-                                  
-                                  <div>
-                                      <label className="text-xs font-medium text-gray-400 mb-1 block">Grok API Key</label>
-                                      <div className="relative">
-                                          <input 
-                                              type="password"
-                                              className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm text-gray-200 outline-none focus:border-purple-500 pr-10"
-                                              placeholder={user ? "xAI API 키 입력" : "로그인이 필요합니다"}
-                                              disabled={!user}
-                                              value={settings.grokApiKey || ''}
-                                              onChange={(e) => handleGrokSettingChange('grokApiKey', e.target.value)}
-                                          />
-                                          {settings.grokApiKey && (
-                                              <div className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500">
-                                                  <CheckCircle2 size={16} />
-                                              </div>
-                                          )}
-                                      </div>
-                                  </div>
                               </div>
 
                               {/* Gemini Settings */}
@@ -640,33 +600,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
                                       <Sparkles size={14} className="text-blue-400" /> Gemini API 설정
                                   </h5>
                                   <p className="text-[10px] text-gray-400">
-                                      Gemini API 키를 등록하면 본인의 할당량을 사용할 수 있습니다. <br/>
-                                      등록하지 않으면 기본 API가 사용됩니다. <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">여기에서 키를 발급받으세요.</a>
+                                      Google Gemini 모델을 사용합니다.
                                   </p>
-                                  
-                                  <div>
-                                      <label className="text-xs font-medium text-gray-400 mb-1 block">Gemini API Key</label>
-                                      <div className="relative">
-                                          <input 
-                                              type="password"
-                                              className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm text-gray-200 outline-none focus:border-purple-500 pr-10"
-                                              placeholder={user ? "API 키 (선택 사항 - 미입력 시 기본 API 사용)" : "로그인이 필요합니다"}
-                                              disabled={!user}
-                                              value={settings.geminiApiKey || ''}
-                                              onChange={(e) => handleGrokSettingChange('geminiApiKey', e.target.value)}
-                                          />
-                                          {settings.geminiApiKey && (
-                                              <div className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500">
-                                                  <CheckCircle2 size={16} />
-                                              </div>
-                                          )}
-                                      </div>
-                                      {!user && (
-                                          <p className="text-[10px] text-amber-500 mt-1 flex items-center gap-1">
-                                              <AlertTriangle size={10} /> API 키 저장을 위해 구글 로그인이 필요합니다.
-                                          </p>
-                                      )}
-                                  </div>
                               </div>
                           </div>
                       </section>
@@ -818,7 +753,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
         onSaveStyle={(s) => { if(onSaveStyle) onSaveStyle(s); }}
         onDeleteStyle={(id) => { if(onDeleteStyle) onDeleteStyle(id); }}
         settings={settings} // Pass settings for Grok usage
-        checkApiKey={checkApiKey}
       />
 
       {/* Synopsis Refiner Modal */}
@@ -836,7 +770,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
         }}
         onCreateProject={onCreateProject}
         settings={settings} // Pass settings for Grok usage
-        checkApiKey={checkApiKey}
       />
     </div>
   );

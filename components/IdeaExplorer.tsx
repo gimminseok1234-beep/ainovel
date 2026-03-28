@@ -21,7 +21,6 @@ interface IdeaExplorerProps {
   onBack: () => void;
   onSaveStyle?: (style: SavedStyle) => void;
   savedStyles?: SavedStyle[];
-  checkApiKey: () => boolean;
   settings?: NovelSettings;
 }
 
@@ -37,7 +36,6 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
   onBack,
   onSaveStyle,
   savedStyles = [],
-  checkApiKey,
   settings
 }) => {
   // ... (state definitions unchanged)
@@ -156,23 +154,14 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
 
   const handleAnalyzeContext = async () => {
       if (!activeProject) return alert("먼저 프로젝트를 연동해주세요.");
-      if (!checkApiKey()) return;
+      
       const projectStories = stories.filter(s => s.projectId === activeProject.id && s.category !== 'synopsis');
       
       setIsAnalyzing(true);
       try {
-          // Prepare Grok Options
-          let grokOptions = undefined;
-          const activeSettings = activeProject?.settings || projects.find(p => p.id === activeProject.id)?.settings;
-          if (activeSettings?.grokApiKey) {
-              grokOptions = { apiKey: activeSettings.grokApiKey };
-          }
-
           const result = await analyzeProjectContext(
               projectStories, 
-              selectedModel, 
-              grokOptions,
-              settings?.magnumApiKey ? { apiKey: settings.magnumApiKey } : undefined
+              selectedModel
           );
           if (result) {
               const lastUpdate = projectStories.length > 0 
@@ -206,7 +195,6 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
 
   const handleSendMessage = async () => {
     if (!input.trim() || !activeSession) return;
-    if (!checkApiKey()) return;
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
@@ -226,23 +214,12 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
     setIsLoading(true);
 
     try {
-      // Prepare Grok Options
-      let grokOptions = undefined;
-      const activeSettings = activeProject?.settings || projects.find(p => p.id === activeProject?.id)?.settings;
-      const effectiveGrokKey = activeSettings?.grokApiKey || settings?.grokApiKey;
-      
-      if (effectiveGrokKey) {
-          grokOptions = { apiKey: effectiveGrokKey };
-      }
-
       if (isSynopsisMode) {
           const options = await generateSynopsisOptions(
               activeProject || null, 
               userMsg.text, 
               contextAnalysis || undefined, 
-              selectedModel, 
-              grokOptions,
-              settings?.magnumApiKey ? { apiKey: settings.magnumApiKey } : undefined
+              selectedModel
           );
           const aiMsg: ChatMessage = {
               id: (Date.now() + 1).toString(),
@@ -263,9 +240,7 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
               updatedSession.messages, 
               contextAnalysis || undefined,
               attachedStyle?.description,
-              selectedModel,
-              grokOptions,
-              settings?.magnumApiKey ? { apiKey: settings.magnumApiKey } : undefined
+              selectedModel
           );
 
           // Parse Data Blocks
@@ -399,25 +374,15 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
 
   const handleRegenerateSynopsis = async () => {
       if (!activeSession) return;
-      if (!checkApiKey()) return;
       const lastUserMsg = [...activeSession.messages].reverse().find(m => m.role === 'user');
       const requestText = lastUserMsg ? lastUserMsg.text : "새로운 시놉시스 옵션을 제안해줘";
       setIsLoading(true);
       try {
-          // Prepare Grok Options
-          let grokOptions = undefined;
-          const activeSettings = activeProject?.settings || projects.find(p => p.id === activeProject?.id)?.settings;
-          if (activeSettings?.grokApiKey) {
-              grokOptions = { apiKey: activeSettings.grokApiKey };
-          }
-
           const options = await generateSynopsisOptions(
               activeProject || null, 
               requestText + " (이전과 다른 새로운 옵션 3가지 제안)", 
               contextAnalysis || undefined, 
-              selectedModel, 
-              grokOptions,
-              settings?.magnumApiKey ? { apiKey: settings.magnumApiKey } : undefined
+              selectedModel
           );
           const aiMsg: ChatMessage = { id: Date.now().toString(), role: 'model', text: "새로운 시놉시스 초안을 생성했습니다.", createdAt: Date.now(), metadata: { type: 'synopsis_options', options: options } };
           onUpdateSession({ ...activeSession, messages: [...activeSession.messages, aiMsg], updatedAt: Date.now() });
@@ -426,26 +391,16 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
 
   const handleSelectSynopsis = async (title: string, summary: string) => {
       if (!activeSession) return;
-      if (!checkApiKey()) return;
       setExpandedOption(null);
       const selectionMsg: ChatMessage = { id: Date.now().toString(), role: 'user', text: `[선택함] ${title}: ${summary}`, createdAt: Date.now() };
       let updatedSession = { ...activeSession, messages: [...activeSession.messages, selectionMsg], updatedAt: Date.now() };
       onUpdateSession(updatedSession);
       setIsLoading(true);
       try {
-          // Prepare Grok Options
-          let grokOptions = undefined;
-          const activeSettings = activeProject?.settings || projects.find(p => p.id === activeProject?.id)?.settings;
-          if (activeSettings?.grokApiKey) {
-              grokOptions = { apiKey: activeSettings.grokApiKey };
-          }
-
           const detailedText = await expandDetailedSynopsis(
               summary, 
               activeProject || null, 
-              selectedModel, 
-              grokOptions,
-              settings?.magnumApiKey ? { apiKey: settings.magnumApiKey } : undefined
+              selectedModel
           );
           const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'model', text: `**[${title}] 상세 시놉시스**\n\n${detailedText}`, createdAt: Date.now() };
           onUpdateSession({ ...updatedSession, messages: [...updatedSession.messages, aiMsg], updatedAt: Date.now() });
@@ -463,7 +418,6 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
 
   const handleOrganizeWorldview = async () => {
       if (!activeSession?.projectId) return alert("프로젝트 연동이 필요합니다.");
-      if (!checkApiKey()) return;
       
       const currentProject = projectsRef.current.find(p => p.id === activeSession.projectId);
       if (!currentProject) return alert("프로젝트를 찾을 수 없습니다.");
@@ -472,18 +426,9 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
       const chatText = activeSession.messages.map(m => `${m.role}: ${m.text}`).join('\n');
       
       try {
-          // Prepare Grok Options
-          let grokOptions = undefined;
-          const activeSettings = activeProject?.settings || projects.find(p => p.id === activeProject?.id)?.settings;
-          if (activeSettings?.grokApiKey) {
-              grokOptions = { apiKey: activeSettings.grokApiKey };
-          }
-
           const newItems = await organizeWorldviewFromChat(
               chatText, 
-              selectedModel, 
-              grokOptions,
-              settings?.magnumApiKey ? { apiKey: settings.magnumApiKey } : undefined
+              selectedModel
           );
           if (newItems.length > 0) {
               if (confirm(`${newItems.length}개의 세계관 설정 카드를 추출했습니다. 저장하시겠습니까?`)) {
@@ -523,7 +468,6 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
 
   const handleExtractCharacter = async () => {
       if (!activeSession?.projectId) return alert("프로젝트 연동이 필요합니다.");
-      if (!checkApiKey()) return;
       
       const currentProject = projectsRef.current.find(p => p.id === activeSession.projectId);
       if (!currentProject) return alert("프로젝트를 찾을 수 없습니다.");
@@ -532,18 +476,9 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
       // Increased context window from 10 to 50 for better inference
       const chatText = activeSession.messages.slice(-50).map(m => `${m.role}: ${m.text}`).join('\n');
       try {
-          // Prepare Grok Options
-          let grokOptions = undefined;
-          const activeSettings = activeProject?.settings || projects.find(p => p.id === activeProject?.id)?.settings;
-          if (activeSettings?.grokApiKey) {
-              grokOptions = { apiKey: activeSettings.grokApiKey };
-          }
-
           const profile = await extractCharacterFromChat(
               chatText, 
-              selectedModel, 
-              grokOptions,
-              settings?.magnumApiKey ? { apiKey: settings.magnumApiKey } : undefined
+              selectedModel
           );
           if (profile) {
               if (confirm(`캐릭터 '${profile.name}' 프로필을 생성했습니다. 저장하시겠습니까?`)) {
@@ -591,22 +526,12 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
 
   const handleAnalyzeStyleFromChat = async () => {
       if (!activeSession) return;
-      if (!checkApiKey()) return;
       setIsSavingStyle(true);
       const chatText = activeSession.messages.map(m => m.text).join('\n');
       try {
-          // Prepare Grok Options
-          let grokOptions = undefined;
-          const activeSettings = activeProject?.settings || projects.find(p => p.id === activeProject?.id)?.settings;
-          if (activeSettings?.grokApiKey) {
-              grokOptions = { apiKey: activeSettings.grokApiKey };
-          }
-
           const result = await analyzeWritingStyle(
               chatText, 
-              selectedModel, 
-              grokOptions,
-              settings?.magnumApiKey ? { apiKey: settings.magnumApiKey } : undefined
+              selectedModel
           );
           setStyleSaveDialog({ isOpen: true, content: result });
       } catch(e) {

@@ -143,18 +143,12 @@ const Controls: React.FC<ControlsProps> = ({
       if (!settings.synopsis) return alert("줄거리를 입력해주세요.");
       setIsAnalyzingStory(true);
       try {
-          const grokOptions = settings.grokApiKey 
-            ? { apiKey: settings.grokApiKey }
-            : undefined;
-
           const selectedModel = settings.manuscriptModel || settings.geminiModel || 'gemini-3-flash-preview';
           const result = await analyzeRawStoryIdea(
             settings.synopsis, 
             1, 
             settings.pov, 
-            selectedModel, 
-            { apiKey: settings.grokApiKey || '' },
-            { apiKey: settings.magnumApiKey || '' }
+            selectedModel
           );
           setStoryAnalysis(result);
           setShowStoryAnalysis(true);
@@ -173,9 +167,7 @@ const Controls: React.FC<ControlsProps> = ({
         const selectedModel = settings.primaryModel || settings.geminiModel || 'gemini-3-flash-preview';
         const result = await analyzeProjectContext(
             projectStories, 
-            selectedModel, 
-            { apiKey: settings.grokApiKey || '' },
-            { apiKey: settings.magnumApiKey || '' }
+            selectedModel
         ); 
         if (result && onUpdateProject) { 
             const lastUpdate = projectStories.length > 0 ? Math.max(...projectStories.map(s => s.updatedAt || s.createdAt)) : 0; 
@@ -213,9 +205,7 @@ const Controls: React.FC<ControlsProps> = ({
                   setLocalGeneratedContent(prev => prev + chunk);
               },
               storyAnalysis || undefined,
-              selectedModel,
-              { apiKey: settings.grokApiKey || '' },
-              { apiKey: settings.magnumApiKey || '' }
+              selectedModel
           );
           
           setIsGenerating(false);
@@ -237,9 +227,7 @@ const Controls: React.FC<ControlsProps> = ({
                   setLocalGeneratedContent(prev => prev + chunk);
               },
               0.7,
-              settings.manuscriptModel || settings.geminiModel || 'gemini-3-flash-preview',
-              { apiKey: settings.grokApiKey || '' },
-              { apiKey: settings.magnumApiKey || '' }
+              settings.manuscriptModel || settings.geminiModel || 'gemini-3-flash-preview'
           );
       } catch(e) {
           alert("이어쓰기 오류");
@@ -294,9 +282,7 @@ const Controls: React.FC<ControlsProps> = ({
           const refined = await refineText(
               localGeneratedContent, 
               instruction, 
-              selectedModel, 
-              { apiKey: settings.grokApiKey || '' },
-              { apiKey: settings.magnumApiKey || '' }
+              selectedModel
           );
           setLocalGeneratedContent(refined);
       } catch(e) { 

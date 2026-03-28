@@ -11,7 +11,6 @@ interface StyleManagerProps {
   onSaveStyle: (style: SavedStyle) => void;
   onDeleteStyle: (id: string) => void;
   settings?: NovelSettings; // NEW PROP
-  checkApiKey?: () => boolean;
 }
 
 const StyleManager: React.FC<StyleManagerProps> = ({
@@ -20,8 +19,7 @@ const StyleManager: React.FC<StyleManagerProps> = ({
   savedStyles,
   onSaveStyle,
   onDeleteStyle,
-  settings,
-  checkApiKey
+  settings
 }) => {
   const [view, setView] = useState<'list' | 'create' | 'detail'>('list');
   const [selectedStyle, setSelectedStyle] = useState<SavedStyle | null>(null);
@@ -35,11 +33,6 @@ const StyleManager: React.FC<StyleManagerProps> = ({
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    if (checkApiKey && !checkApiKey()) {
-        if (fileInputRef.current) fileInputRef.current.value = '';
-        return;
-    }
 
     if (file.size > 5 * 1024 * 1024) {
         alert("파일이 너무 큽니다. 5MB 이하의 텍스트 파일을 사용해주세요.");
@@ -55,29 +48,9 @@ const StyleManager: React.FC<StyleManagerProps> = ({
         const text = event.target?.result as string;
         if (!text || text.trim().length === 0) throw new Error("파일 내용이 비어있습니다.");
         
-        // Prepare Grok options
-        let grokOptions = undefined;
-        if (settings?.grokApiKey) {
-            grokOptions = {
-                apiKey: settings.grokApiKey,
-                model: settings.grokModel || 'grok-3'
-            };
-        }
-
-        // Prepare Magnum options
-        let magnumOptions = undefined;
-        if (settings?.magnumApiKey) {
-            magnumOptions = {
-                apiKey: settings.magnumApiKey,
-                model: settings.magnumModel || 'anthracite-org/magnum-v4-72b'
-            };
-        }
-
         let result = await analyzeWritingStyle(
             text, 
-            settings?.primaryModel || settings?.geminiModel || 'gemini-3-flash-preview', 
-            grokOptions,
-            magnumOptions
+            settings?.primaryModel || settings?.geminiModel || 'gemini-3-flash-preview'
         );
         
         if (!result) throw new Error("AI가 스타일을 분석하지 못했습니다.");

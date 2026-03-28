@@ -1,5 +1,6 @@
 
 // ... existing imports ...
+import { OpenRouter } from '@openrouter/sdk';
 import { NovelSettings, Project, MindMapNode, CharacterRelationship, CharacterProfile, WorldItem, ChapterOutline, StoryDetails, ChatMessage, SavedStory, RefinedSynopsisCard, DEFAULT_SETTINGS } from "../types.ts";
 
 const HarmCategory = {
@@ -41,10 +42,10 @@ import {
 } from "./prompts.ts";
 
 // Initialize client helper
-let currentGeminiApiKey: string | undefined;
+let currentGlobalModel: string = 'gemini-2.0-flash';
 
-export const setGeminiApiKey = (key: string | undefined) => {
-    currentGeminiApiKey = key;
+export const setGlobalModel = (model: string) => {
+    currentGlobalModel = model;
 };
 
 // Re-export AI_PROMPTS for components to use
@@ -72,7 +73,9 @@ export const handleApiError = (e: any) => {
 };
 
 export const AI_MODELS = [
+    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', provider: 'gemini' },
     { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', provider: 'gemini' },
+    { id: 'gemini-3.1-flash-preview', name: 'Gemini 3.1 Flash', provider: 'gemini' },
     { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', provider: 'gemini' },
     { id: 'grok-3', name: 'Grok 3', provider: 'grok' },
     { id: 'anthracite-org/magnum-v4-72b', name: 'Magnum v4 72B', provider: 'magnum' }
@@ -111,9 +114,9 @@ const callGrokAPI = async (
   temperature: number = 0.7
 ): Promise<string> => {
   try {
-    const effectiveApiKey = (apiKey || DEFAULT_SETTINGS.grokApiKey || '').trim();
+    const effectiveApiKey = (import.meta.env.VITE_GROK_API_KEY || '').trim();
     if (!effectiveApiKey) {
-        throw new Error("Grok API Key is missing. Please register it in settings.");
+      throw new Error("Grok API Key is missing. Please set VITE_GROK_API_KEY in your environment.");
     }
     const effectiveModel = model || 'grok-3';
 
@@ -123,8 +126,7 @@ const callGrokAPI = async (
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${effectiveApiKey}`,
-        "X-Bypass-Proxy": "true"
+        "Authorization": `Bearer ${effectiveApiKey}`
       },
       body: JSON.stringify({
         messages: messages,
@@ -187,73 +189,63 @@ const callMagnumAPI = async (
   temperature: number = 0.7
 ): Promise<string> => {
   try {
-    // 사용자님이 제공하신 API 키 (중간에 ...이 포함된 경우 401 오류가 발생할 수 있으니 전체 키를 입력해주세요)
-    const PROVIDED_KEY = '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'; 
-    const effectiveApiKey = (apiKey || DEFAULT_SETTINGS.magnumApiKey || PROVIDED_KEY).trim();
-    
-    if (!effectiveApiKey || effectiveApiKey.includes('...')) {
-        throw new Error("Magnum API Key가 유효하지 않거나 중간에 생략되었습니다. 전체 키를 설정에서 입력해주세요.");
+    const effectiveApiKey = (import.meta.env.VITE_MAGNUM_API_KEY || '').trim();
+    if (!effectiveApiKey) {
+      throw new Error("Magnum API Key is missing. Please set VITE_MAGNUM_API_KEY in your environment.");
     }
     const effectiveModel = model || 'anthracite-org/magnum-v4-72b';
 
     notifyModelUsage('OpenRouter Magnum', effectiveModel);
 
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${effectiveApiKey}`,
-        "HTTP-Referer": typeof window !== 'undefined' ? window.location.origin : "https://novelcraft.app",
-        "X-Title": "NovelCraft",
-        "X-Bypass-Proxy": "true"
-      },
-      body: JSON.stringify({
-        messages: messages,
-        model: effectiveModel,
-        stream: true, 
-        temperature: temperature,
-        max_tokens: 8192 
-      })
+    const openRouter = new OpenRouter({
+      apiKey: effectiveApiKey,
+      httpReferer: (typeof window !== 'undefined' && window.location.origin && window.location.origin !== 'null') ? window.location.origin : "https://novelcraft.app",
+      appTitle: 'NovelCraft',
     });
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Magnum API Error: ${response.status} ${response.statusText} - ${errorText}`);
-    }
+    if (onChunk) {
+      // Streaming mode
+      const response = await openRouter.chat.send({
+        chatGenerationParams: {
+          model: effectiveModel,
+          messages: messages,
+          temperature: temperature,
+          stream: true,
+        },
+      });
 
-    if (!response.body) throw new Error("Magnum API response body is empty");
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let fullText = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
-      
-      for (const line of lines) {
-        if (line.trim().startsWith('data: ')) {
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') break;
-          
-          try {
-            const parsed = JSON.parse(data);
-            const content = parsed.choices?.[0]?.delta?.content || "";
-            if (content) {
-              fullText += content;
-              if (onChunk) onChunk(content);
-            }
-          } catch (e) {
-            // Skip non-JSON lines
+      // The SDK returns an EventStream for streaming
+      // We need to check if it's an EventStream
+      if ('[Symbol.asyncIterator]' in response) {
+        let fullText = "";
+        for await (const chunk of response) {
+          const content = chunk.choices?.[0]?.delta?.content || "";
+          if (content) {
+            fullText += content;
+            onChunk(content);
           }
         }
+        return fullText;
+      } else {
+        // Fallback if not streaming for some reason
+        const content = (response as any).choices?.[0]?.message?.content || "";
+        if (content) onChunk(content);
+        return content;
       }
+    } else {
+      // Non-streaming mode
+      const response = await openRouter.chat.send({
+        chatGenerationParams: {
+          model: effectiveModel,
+          messages: messages,
+          temperature: temperature,
+          stream: false,
+        },
+      });
+      
+      // For non-streaming, it returns ChatResponse
+      return (response as any).choices?.[0]?.message?.content || "";
     }
-
-    return fullText;
   } catch (error) {
     console.error("Magnum API Error", error);
     throw error;
@@ -290,10 +282,8 @@ export const refineSynopsisWithContext = async (
   recentStories: SavedStory[],
   preAnalyzedContext?: string,
   styleGuide?: string,
-  grokOptions?: { apiKey: string, model: string },
   targetChapterCount: number = 1,
-  model: string = 'gemini-3-flash-preview',
-  magnumOptions?: { apiKey: string, model: string }
+  model: string = 'gemini-3-flash-preview'
 ): Promise<RefinedSynopsisCard[]> => {
   
   let contextData = "";
@@ -314,12 +304,11 @@ export const refineSynopsisWithContext = async (
   const prompt = getGeneralSynopsisPrompt(rawSynopsis, contextData, structureInstruction, styleGuide);
 
   try {
+    const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
     const result = await callAI(
         [{ role: 'user', content: prompt }],
-        model,
+        effectiveModel,
         {
-            grokApiKey: grokOptions?.apiKey,
-            magnumApiKey: magnumOptions?.apiKey,
             responseMimeType: 'application/json'
         }
     );
@@ -332,19 +321,14 @@ export const refineSynopsisWithContext = async (
 
 export const analyzeSynopsisReference = async (
     text: string, 
-    model: string = 'gemini-3-flash-preview', 
-    grokOptions?: { apiKey: string },
-    magnumOptions?: { apiKey: string }
+    model: string = 'gemini-3-flash-preview'
 ): Promise<string> => {
     const prompt = getReferenceAnalysisPrompt(text);
     try {
+        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         return await callAI(
             [{ role: 'user', content: prompt }],
-            model,
-            {
-                grokApiKey: grokOptions?.apiKey,
-                magnumApiKey: magnumOptions?.apiKey
-            }
+            effectiveModel
         );
     } catch (e) {
         handleApiError(e);
@@ -362,9 +346,7 @@ export const generateNovelStep = async (
     contextAnalysis?: string,
     onChunk?: (text: string) => void, 
     storyAnalysis?: string,
-    model: string = 'gemini-3-flash-preview',
-    grokOptions?: { apiKey: string },
-    magnumOptions?: { apiKey: string }
+    model: string = 'gemini-3-flash-preview'
 ): Promise<string> => {
     
     const promptContext = getNovelContextPrompt(
@@ -379,15 +361,14 @@ export const generateNovelStep = async (
     const systemPrompt = GENERAL_SYSTEM_PROMPT;
     
     try {
+        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         return await callAI(
             [
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: promptContext }
             ],
-            model,
+            effectiveModel,
             {
-                grokApiKey: grokOptions?.apiKey || settings.grokApiKey,
-                magnumApiKey: magnumOptions?.apiKey || settings.magnumApiKey,
                 onChunk,
                 temperature: 0.7
             }
@@ -447,8 +428,7 @@ const callGeminiAPI = async (
     const response = await fetch(url, {
         method: "POST",
         headers: {
-            "Content-Type": "application/json",
-            "X-Bypass-Proxy": "true"
+            "Content-Type": "application/json"
         },
         body: JSON.stringify(body)
     });
@@ -500,35 +480,30 @@ export const callAI = async (
     messages: { role: string, content: string }[],
     model: string,
     options: {
-        grokApiKey?: string,
-        magnumApiKey?: string,
         onChunk?: (text: string) => void,
         temperature?: number,
         responseMimeType?: string
-    }
+    } = {}
 ): Promise<string> => {
     const isGrok = isGrokModel(model);
     const isMagnum = isMagnumModel(model);
 
     if (isGrok) {
         try {
-            return await callGrokAPI(messages, model, options.grokApiKey || '', options.onChunk, options.temperature);
+            return await callGrokAPI(messages, model, '', options.onChunk, options.temperature);
         } catch (e) {
             console.error("Grok API failed, falling back to Gemini", e);
             return await callAI(messages, 'gemini-3-flash-preview', options);
         }
     } else if (isMagnum) {
-        try {
-            return await callMagnumAPI(messages, model, options.magnumApiKey || '', options.onChunk, options.temperature);
-        } catch (e) {
-            console.error("Magnum API failed, falling back to Gemini", e);
-            // If it's a 401 error, we definitely want to fallback
-            return await callAI(messages, 'gemini-3-flash-preview', options);
-        }
+        // Magnum (OpenRouter) does not fallback to Gemini as per user request
+        return await callMagnumAPI(messages, model, '', options.onChunk, options.temperature);
     } else {
-        const key = currentGeminiApiKey || import.meta.env.VITE_GEMINI_API_KEY || "AIzaSyCkYx0xtEZCkZEW_D7sDTAhaN4grrvIe0k";
-        if (!key) throw new Error("Gemini API Key is missing. Please register it in settings.");
-
+        const key = import.meta.env.VITE_GEMINI_API_KEY || "";
+        if (!key) {
+            throw new Error("Gemini API Key is missing. Please set VITE_GEMINI_API_KEY in your environment.");
+        }
+        
         const systemMsg = messages.find(m => m.role === 'system')?.content;
         
         const config: any = { 
@@ -546,19 +521,17 @@ export const analyzeRawStoryIdea = async (
     idea: string, 
     chapterCount: number, 
     pov: string, 
-    model: string = 'gemini-3-flash-preview',
-    grokOptions?: { apiKey: string },
-    magnumOptions?: { apiKey: string }
+    model: string = 'gemini-3-flash-preview'
 ): Promise<string> => {
     const prompt = getRawStoryIdeaAnalysisPrompt(idea, chapterCount, pov);
 
     try {
+        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         return await callAI(
             [{ role: 'user', content: prompt }],
-            model,
+            effectiveModel,
             {
-                grokApiKey: grokOptions?.apiKey,
-                magnumApiKey: magnumOptions?.apiKey
+                temperature: 0.8
             }
         );
     } catch (e) {
@@ -572,19 +545,16 @@ export const generateStoryArch = async (
     chapterCount: number, 
     analysisContext?: string, 
     preserveSynopsis: boolean = false,
-    model: string = 'gemini-3-flash-preview',
-    grokOptions?: { apiKey: string },
-    magnumOptions?: { apiKey: string }
+    model: string = 'gemini-3-flash-preview'
 ): Promise<StoryDetails | null> => {
     const prompt = getStoryArchPrompt(idea, analysisContext, preserveSynopsis, chapterCount);
 
     try {
+        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         const resp = await callAI(
             [{ role: 'user', content: prompt }],
-            model,
+            effectiveModel,
             {
-                grokApiKey: grokOptions?.apiKey,
-                magnumApiKey: magnumOptions?.apiKey,
                 responseMimeType: 'application/json'
             }
         );
@@ -601,19 +571,16 @@ export const generateEpisodeOutline = async (
     hashtags: string[], 
     storyDetails: StoryDetails, 
     preserveSynopsis: boolean = false,
-    model: string = 'gemini-3-flash-preview',
-    grokOptions?: { apiKey: string },
-    magnumOptions?: { apiKey: string }
+    model: string = 'gemini-3-flash-preview'
 ): Promise<ChapterOutline[]> => {
     const prompt = getEpisodeOutlinePrompt(chapterCount, storyDetails);
 
     try {
+        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         const resp = await callAI(
             [{ role: 'user', content: prompt }],
-            model,
+            effectiveModel,
             {
-                grokApiKey: grokOptions?.apiKey,
-                magnumApiKey: magnumOptions?.apiKey,
                 responseMimeType: 'application/json'
             }
         );
@@ -625,19 +592,16 @@ export const continueStoryStream = async (
     currentContent: string, 
     onChunk: (text: string) => void,
     temperature: number = 0.7,
-    model: string = 'gemini-3-flash-preview',
-    grokOptions?: { apiKey: string },
-    magnumOptions?: { apiKey: string }
+    model: string = 'gemini-3-flash-preview'
 ): Promise<string> => {
     const prompt = getContinueStoryPrompt(currentContent);
     
     try {
+        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         return await callAI(
             [{ role: 'user', content: prompt }],
-            model,
+            effectiveModel,
             {
-                grokApiKey: grokOptions?.apiKey,
-                magnumApiKey: magnumOptions?.apiKey,
                 onChunk,
                 temperature
             }
@@ -651,20 +615,15 @@ export const continueStoryStream = async (
 export const refineText = async (
     text: string, 
     instruction: string, 
-    model: string = 'gemini-3-flash-preview',
-    grokOptions?: { apiKey: string },
-    magnumOptions?: { apiKey: string }
+    model: string = 'gemini-3-flash-preview'
 ): Promise<string> => {
     const prompt = getRefineTextPrompt(text, instruction);
     
     try {
+        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         return await callAI(
             [{ role: 'user', content: prompt }],
-            model,
-            {
-                grokApiKey: grokOptions?.apiKey,
-                magnumApiKey: magnumOptions?.apiKey
-            }
+            effectiveModel
         );
     } catch (e) {
         handleApiError(e);
@@ -672,16 +631,15 @@ export const refineText = async (
     }
 };
 
-export const analyzeManuscript = async (text: string, model: string = 'gemini-3-flash-preview', grokOptions?: { apiKey: string }, magnumOptions?: { apiKey: string }): Promise<{title: string, worldview: {title: string, content: string}[], characters: CharacterProfile[]} | null> => {
+export const analyzeManuscript = async (text: string, model: string = 'gemini-3-flash-preview'): Promise<{title: string, worldview: {title: string, content: string}[], characters: CharacterProfile[]} | null> => {
     const prompt = getManuscriptAnalysisPrompt(text);
     
     try {
+        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         const responseText = await callAI(
             [{ role: 'user', content: prompt }],
-            model,
+            effectiveModel,
             {
-                grokApiKey: grokOptions?.apiKey,
-                magnumApiKey: magnumOptions?.apiKey,
                 responseMimeType: 'application/json'
             }
         );
@@ -725,9 +683,7 @@ const sortStoriesByChapter = (stories: SavedStory[]) => {
 
 export const analyzeProjectContext = async (
     stories: SavedStory[],
-    model: string = 'gemini-3-flash-preview',
-    grokOptions?: { apiKey: string },
-    magnumOptions?: { apiKey: string }
+    model: string = 'gemini-3-flash-preview'
 ): Promise<{ analysis: string; references: string[] } | null> => {
     if (!stories || stories.length === 0) {
         return null;
@@ -747,13 +703,10 @@ export const analyzeProjectContext = async (
     const prompt = getProjectContextAnalysisPrompt(contextSample);
 
     try {
+        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         const analysisText = await callAI(
             [{ role: 'user', content: prompt }],
-            model,
-            {
-                grokApiKey: grokOptions?.apiKey,
-                magnumApiKey: magnumOptions?.apiKey
-            }
+            effectiveModel
         );
         return {
             analysis: analysisText,
@@ -796,9 +749,7 @@ export const chatWithWorldBuilderAIAssistant = async (
     worldItems: any[],
     userMsg: string,
     history: any[],
-    model: string = 'gemini-3.1-pro-preview',
-    grokOptions?: { apiKey: string },
-    magnumOptions?: { apiKey: string }
+    model: string = 'gemini-3.1-pro-preview'
 ): Promise<{ reply: string, suggestedItem?: { title: string, content: string, type: 'folder' | 'note' } }> => {
     const prompt = `
     You are an AI World Building Assistant for a story project.
@@ -840,8 +791,6 @@ export const chatWithWorldBuilderAIAssistant = async (
             ],
             model,
             {
-                grokApiKey: grokOptions?.apiKey,
-                magnumApiKey: magnumOptions?.apiKey,
                 responseMimeType: 'application/json'
             }
         );
@@ -866,19 +815,16 @@ export const generateCharacterProfile = async (
     name: string, 
     role: string, 
     extra?: string,
-    model: string = 'gemini-3-flash-preview',
-    grokOptions?: { apiKey: string },
-    magnumOptions?: { apiKey: string }
+    model: string = 'gemini-3-flash-preview'
 ): Promise<CharacterProfile | null> => {
     const prompt = getCharacterProfilePrompt(worldview, name, role, extra);
     
     try {
+        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         const responseText = await callAI(
             [{ role: 'user', content: prompt }],
-            model,
+            effectiveModel,
             {
-                grokApiKey: grokOptions?.apiKey,
-                magnumApiKey: magnumOptions?.apiKey,
                 responseMimeType: 'application/json'
             }
         );
@@ -889,18 +835,15 @@ export const generateCharacterProfile = async (
 
 export const generateRelationshipMap = async (
     charactersJson: string,
-    model: string = 'gemini-3-flash-preview',
-    grokOptions?: { apiKey: string },
-    magnumOptions?: { apiKey: string }
+    model: string = 'gemini-3-flash-preview'
 ): Promise<CharacterRelationship[]> => {
     const prompt = getRelationshipMapPrompt(charactersJson);
     try {
+        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         const responseText = await callAI(
             [{ role: 'user', content: prompt }],
-            model,
+            effectiveModel,
             {
-                grokApiKey: grokOptions?.apiKey,
-                magnumApiKey: magnumOptions?.apiKey,
                 responseMimeType: 'application/json'
             }
         );
@@ -913,9 +856,7 @@ export const chatWithStoryArchitect = async (
     details: StoryDetails | null, 
     userMsg: string, 
     history: any[],
-    model: string = 'gemini-3.1-pro-preview',
-    grokOptions?: { apiKey: string },
-    magnumOptions?: { apiKey: string }
+    model: string = 'gemini-3.1-pro-preview'
 ): Promise<{reply: string, updatedDetails?: StoryDetails}> => {
     const prompt = getStoryArchitectChatPrompt(details, userMsg);
     
@@ -927,8 +868,6 @@ export const chatWithStoryArchitect = async (
             ],
             model,
             {
-                grokApiKey: grokOptions?.apiKey,
-                magnumApiKey: magnumOptions?.apiKey,
                 responseMimeType: 'application/json'
             }
         );
@@ -952,9 +891,7 @@ export const chatWithIdeaPartner = async (
     messages: ChatMessage[], 
     contextAnalysis?: string, 
     styleDescription?: string,
-    model: string = 'gemini-3-flash-preview',
-    grokOptions?: { apiKey: string },
-    magnumOptions?: { apiKey: string }
+    model: string = 'gemini-3-flash-preview'
 ): Promise<string> => {
     const history = messages.map(m => ({ role: m.role, content: m.text }));
     const lastMsg = history.pop();
@@ -964,17 +901,14 @@ export const chatWithIdeaPartner = async (
     const systemPrompt = getIdeaPartnerSystemPrompt(project, contextAnalysis, styleDescription);
     
     try {
+        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         return await callAI(
             [
                 { role: 'system', content: systemPrompt },
                 ...history,
                 lastMsg
             ],
-            model,
-            {
-                grokApiKey: grokOptions?.apiKey,
-                magnumApiKey: magnumOptions?.apiKey
-            }
+            effectiveModel
         );
     } catch (e) {
         handleApiError(e);
@@ -986,18 +920,15 @@ export const generateSynopsisOptions = async (
     project: Project | null, 
     input: string, 
     contextAnalysis?: string,
-    model: string = 'gemini-3-flash-preview',
-    grokOptions?: { apiKey: string },
-    magnumOptions?: { apiKey: string }
+    model: string = 'gemini-3-flash-preview'
 ): Promise<any[]> => {
     const prompt = getSynopsisOptionsPrompt(input, contextAnalysis);
     try {
+        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         const responseText = await callAI(
             [{ role: 'user', content: prompt }],
-            model,
+            effectiveModel,
             {
-                grokApiKey: grokOptions?.apiKey,
-                magnumApiKey: magnumOptions?.apiKey,
                 responseMimeType: 'application/json'
             }
         );
@@ -1009,19 +940,13 @@ export const generateSynopsisOptions = async (
 export const expandDetailedSynopsis = async (
     summary: string, 
     project: Project | null,
-    model: string = 'gemini-3.1-pro-preview',
-    grokOptions?: { apiKey: string },
-    magnumOptions?: { apiKey: string }
+    model: string = 'gemini-3.1-pro-preview'
 ): Promise<string> => {
     const prompt = getExpandDetailedSynopsisPrompt(summary);
     try {
         return await callAI(
             [{ role: 'user', content: prompt }],
-            model,
-            {
-                grokApiKey: grokOptions?.apiKey,
-                magnumApiKey: magnumOptions?.apiKey
-            }
+            model
         );
     } catch (e) {
         handleApiError(e);
@@ -1031,18 +956,15 @@ export const expandDetailedSynopsis = async (
 
 export const organizeWorldviewFromChat = async (
     chatText: string,
-    model: string = 'gemini-3-flash-preview',
-    grokOptions?: { apiKey: string },
-    magnumOptions?: { apiKey: string }
+    model: string = 'gemini-3-flash-preview'
 ): Promise<WorldItem[]> => {
     const prompt = getOrganizeWorldviewPrompt(chatText);
     try {
+        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         const responseText = await callAI(
             [{ role: 'user', content: prompt }],
-            model,
+            effectiveModel,
             {
-                grokApiKey: grokOptions?.apiKey,
-                magnumApiKey: magnumOptions?.apiKey,
                 responseMimeType: 'application/json'
             }
         );
@@ -1056,18 +978,15 @@ export const organizeWorldviewFromChat = async (
 
 export const extractCharacterFromChat = async (
     chatText: string,
-    model: string = 'gemini-3-flash-preview',
-    grokOptions?: { apiKey: string },
-    magnumOptions?: { apiKey: string }
+    model: string = 'gemini-3-flash-preview'
 ): Promise<CharacterProfile | null> => {
     const prompt = getExtractCharacterPrompt(chatText);
     try {
+        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         const responseText = await callAI(
             [{ role: 'user', content: prompt }],
-            model,
+            effectiveModel,
             {
-                grokApiKey: grokOptions?.apiKey,
-                magnumApiKey: magnumOptions?.apiKey,
                 responseMimeType: 'application/json'
             }
         );
@@ -1078,19 +997,14 @@ export const extractCharacterFromChat = async (
 
 export const analyzeWritingStyle = async (
     text: string,
-    model: string = 'gemini-3-flash-preview',
-    grokOptions?: { apiKey: string },
-    magnumOptions?: { apiKey: string }
+    model: string = 'gemini-3-flash-preview'
 ): Promise<string> => {
     const prompt = getWritingStyleAnalysisPrompt(text);
     try {
+        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         return await callAI(
             [{ role: 'user', content: prompt }],
-            model,
-            {
-                grokApiKey: grokOptions?.apiKey,
-                magnumApiKey: magnumOptions?.apiKey
-            }
+            effectiveModel
         );
     } catch (e) {
         handleApiError(e);
@@ -1103,9 +1017,7 @@ export const generateProjectAssistantResponse = async (
     projects: Project[], 
     selectedProjectId: string | null, 
     history: any[],
-    model: string = 'gemini-3-flash-preview',
-    grokOptions?: { apiKey: string },
-    magnumOptions?: { apiKey: string }
+    model: string = 'gemini-3-flash-preview'
 ): Promise<string> => {
     const contextProject = selectedProjectId ? projects.find(p => p.id === selectedProjectId) : null;
     const context = contextProject 
@@ -1115,17 +1027,14 @@ export const generateProjectAssistantResponse = async (
     const prompt = getProjectAssistantPrompt(context, query);
     
     try {
+        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         return await callAI(
             [
                 { role: 'system', content: "You are a helpful writing assistant for NovelCraft." },
                 ...history.map(m => ({ role: m.role === 'model' ? 'assistant' : m.role, content: m.text })),
                 { role: 'user', content: prompt }
             ],
-            model,
-            {
-                grokApiKey: grokOptions?.apiKey,
-                magnumApiKey: magnumOptions?.apiKey
-            }
+            effectiveModel
         );
     } catch (e) {
         handleApiError(e);
