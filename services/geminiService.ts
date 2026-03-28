@@ -526,7 +526,7 @@ export const callAI = async (
             return await callAI(messages, 'gemini-3-flash-preview', options);
         }
     } else {
-        const key = currentGeminiApiKey || process.env.GEMINI_API_KEY;
+        const key = currentGeminiApiKey || import.meta.env.VITE_GEMINI_API_KEY || "AIzaSyCkYx0xtEZCkZEW_D7sDTAhaN4grrvIe0k";
         if (!key) throw new Error("Gemini API Key is missing. Please register it in settings.");
 
         const systemMsg = messages.find(m => m.role === 'system')?.content;
