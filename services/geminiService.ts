@@ -190,7 +190,7 @@ const callMagnumAPI = async (
 
     notifyModelUsage('OpenRouter Magnum', effectiveModel);
 
-    const response = await fetch("/api/magnum", {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
