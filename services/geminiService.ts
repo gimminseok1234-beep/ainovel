@@ -1,7 +1,20 @@
 
 // ... existing imports ...
-import { GoogleGenAI, HarmCategory, HarmBlockThreshold, Type, GenerateContentResponse } from "@google/genai";
 import { NovelSettings, Project, MindMapNode, CharacterRelationship, CharacterProfile, WorldItem, ChapterOutline, StoryDetails, ChatMessage, SavedStory, RefinedSynopsisCard, DEFAULT_SETTINGS } from "../types.ts";
+
+const HarmCategory = {
+    HARM_CATEGORY_HATE_SPEECH: 'HARM_CATEGORY_HATE_SPEECH',
+    HARM_CATEGORY_DANGEROUS_CONTENT: 'HARM_CATEGORY_DANGEROUS_CONTENT',
+    HARM_CATEGORY_SEXUALLY_EXPLICIT: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+    HARM_CATEGORY_HARASSMENT: 'HARM_CATEGORY_HARASSMENT'
+};
+
+const HarmBlockThreshold = {
+    BLOCK_NONE: 'BLOCK_NONE',
+    BLOCK_ONLY_HIGH: 'BLOCK_ONLY_HIGH',
+    BLOCK_MEDIUM_AND_ABOVE: 'BLOCK_MEDIUM_AND_ABOVE',
+    BLOCK_LOW_AND_ABOVE: 'BLOCK_LOW_AND_ABOVE'
+};
 import { 
     AI_PROMPTS, 
     getGeneralSynopsisPrompt, 
@@ -32,12 +45,6 @@ let currentGeminiApiKey: string | undefined;
 
 export const setGeminiApiKey = (key: string | undefined) => {
     currentGeminiApiKey = key;
-};
-
-const getAiClient = () => {
-    const key = currentGeminiApiKey || process.env.GEMINI_API_KEY;
-    if (!key) throw new Error("Gemini API Key is missing. Please register it in settings.");
-    return new GoogleGenAI({ apiKey: key });
 };
 
 // Re-export AI_PROMPTS for components to use
@@ -116,7 +123,8 @@ const callGrokAPI = async (
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${effectiveApiKey}`
+        "Authorization": `Bearer ${effectiveApiKey}`,
+        "X-Bypass-Proxy": "true"
       },
       body: JSON.stringify({
         messages: messages,
@@ -196,7 +204,8 @@ const callMagnumAPI = async (
         "Content-Type": "application/json",
         "Authorization": `Bearer ${effectiveApiKey}`,
         "HTTP-Referer": typeof window !== 'undefined' ? window.location.origin : "https://novelcraft.app",
-        "X-Title": "NovelCraft"
+        "X-Title": "NovelCraft",
+        "X-Bypass-Proxy": "true"
       },
       body: JSON.stringify({
         messages: messages,
@@ -403,6 +412,90 @@ export const generateNovelStep = async (
     }
 };
 
+const callGeminiAPI = async (
+    messages: { role: string, content: string }[],
+    model: string,
+    apiKey: string,
+    config: any,
+    onChunk?: (text: string) => void
+): Promise<string> => {
+    const isStream = !!onChunk;
+    const action = isStream ? "streamGenerateContent?alt=sse" : "generateContent";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:${action}${isStream ? '&' : '?'}key=${apiKey}`;
+
+    const userMsgs = messages.filter(m => m.role !== 'system');
+    const prompt = userMsgs.map(m => m.content).join("\n\n");
+
+    const body: any = {
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+            temperature: config.temperature || 0.7,
+            maxOutputTokens: config.maxOutputTokens || 8192,
+            responseMimeType: config.responseMimeType
+        },
+        safetySettings: SAFETY_SETTINGS
+    };
+
+    if (config.systemInstruction) {
+        body.systemInstruction = {
+            parts: [{ text: config.systemInstruction }]
+        };
+    }
+
+    notifyModelUsage('Google Gemini', model);
+
+    const response = await fetch(url, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-Bypass-Proxy": "true"
+        },
+        body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Gemini API Error: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+
+    if (isStream) {
+        if (!response.body) throw new Error("Gemini API response body is empty");
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let fullText = "";
+        let buffer = "";
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+                if (line.trim().startsWith("data: ")) {
+                    const dataStr = line.trim().substring(6);
+                    try {
+                        const data = JSON.parse(dataStr);
+                        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                        if (text) {
+                            fullText += text;
+                            onChunk(text);
+                        }
+                    } catch (e) {
+                        // Ignore parse errors for incomplete chunks
+                    }
+                }
+            }
+        }
+        return fullText;
+    } else {
+        const data = await response.json();
+        return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    }
+};
+
 export const callAI = async (
     messages: { role: string, content: string }[],
     model: string,
@@ -433,43 +526,19 @@ export const callAI = async (
             return await callAI(messages, 'gemini-3-flash-preview', options);
         }
     } else {
-        const ai = getAiClient();
+        const key = currentGeminiApiKey || process.env.GEMINI_API_KEY;
+        if (!key) throw new Error("Gemini API Key is missing. Please register it in settings.");
+
         const systemMsg = messages.find(m => m.role === 'system')?.content;
-        const userMsgs = messages.filter(m => m.role !== 'system');
-        const prompt = userMsgs.map(m => m.content).join("\n\n");
         
         const config: any = { 
             temperature: options.temperature,
-            responseMimeType: options.responseMimeType as any,
-            maxOutputTokens: 8192
+            responseMimeType: options.responseMimeType,
+            maxOutputTokens: 8192,
+            systemInstruction: systemMsg
         };
-        if (systemMsg) {
-            config.systemInstruction = systemMsg;
-        }
 
-        if (options.onChunk) {
-            const response = await ai.models.generateContentStream({
-                model: model,
-                contents: [{ role: 'user', parts: [{ text: prompt }] }],
-                config
-            });
-            let fullText = "";
-            for await (const chunk of response) {
-                const text = chunk.text;
-                if (text) {
-                    fullText += text;
-                    options.onChunk(text);
-                }
-            }
-            return fullText;
-        } else {
-            const response = await ai.models.generateContent({
-                model: model,
-                contents: [{ role: 'user', parts: [{ text: prompt }] }],
-                config
-            });
-            return response.text || "";
-        }
+        return await callGeminiAPI(messages, model, key, config, options.onChunk);
     }
 };
 
