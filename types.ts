@@ -19,7 +19,7 @@ export interface SavedStyle {
   id: string;
   name: string;
   description: string; // The analyzed instruction set
-  type: 'general' | 'mature' | 'mixed'; // Added 'mixed'
+  type: 'general';
   createdAt: number;
 }
 
@@ -57,21 +57,25 @@ export interface NovelSettings {
   targetLength: number;
   referenceText: string;
   styleDescription: string;
-  matureReferenceText?: string;
-  matureStyleDescription?: string;
   guidelines: string;
-  isMature: boolean;
   activeStyleId?: string;
-  activeStyle?: 'general' | 'mature' | 'mixed';
   hashtags?: string[];
   creativityLevel?: number; // 1-10
   geminiApiKey?: string; // Added for User-provided API Key
   
   // Grok Options
-  aiProvider?: 'gemini' | 'grok';
+  aiProvider?: 'gemini' | 'grok' | 'magnum';
   grokApiKey?: string;
   grokModel?: string;
+  magnumApiKey?: string;
+  magnumModel?: string;
   geminiModel?: string; // Added for Gemini Model Selection
+  selectedModel?: string; // Unified model selection (legacy/override)
+  
+  // Granular Model Selection
+  primaryModel?: string;
+  manuscriptModel?: string;
+  synopsisModel?: string;
 
   // AI Presets
   aiPresets?: AiPreset[];
@@ -185,10 +189,16 @@ export const DEFAULT_SETTINGS: NovelSettings = {
   referenceText: "",
   styleDescription: "",
   guidelines: "",
-  isMature: false,
-  activeStyle: 'general',
   hashtags: [],
   creativityLevel: 3,
   geminiModel: 'gemini-3-flash-preview',
+  selectedModel: 'gemini-3-flash-preview',
+  primaryModel: 'gemini-3-flash-preview',
+  manuscriptModel: 'gemini-3-flash-preview',
+  synopsisModel: 'gemini-3-flash-preview',
+  grokApiKey: '',
+  grokModel: 'grok-3',
+  magnumApiKey: '',
+  magnumModel: 'anthracite-org/magnum-v4-72b',
   aiPresets: [] // Will be populated with defaults on init
 };

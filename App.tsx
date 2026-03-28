@@ -286,8 +286,6 @@ function App() {
                   previousStoryContent: merged.previousStoryContent || "",
                   referenceText: merged.referenceText || "",
                   styleDescription: merged.styleDescription || "",
-                  matureReferenceText: merged.matureReferenceText || "",
-                  matureStyleDescription: merged.matureStyleDescription || "",
                   guidelines: merged.guidelines || "",
                   activeStyleId: merged.activeStyleId || undefined
               };
@@ -564,6 +562,10 @@ function App() {
     setIsMobileMenuOpen(false);
     const projectContext = activeProjectId ? projects.find(p => p.id === activeProjectId) || null : null;
     try {
+      const model = settings.selectedModel || settings.geminiModel || 'gemini-3-flash-preview';
+      const grokOptions = { apiKey: settings.grokApiKey || '' };
+      const magnumOptions = { apiKey: settings.magnumApiKey || '' };
+      
       // FIX: Use generateNovelStep with correct arguments (single shot generation: 1/1)
       await generateNovelStep(
           1, 1, settings, projectContext, "", 
@@ -571,7 +573,11 @@ function App() {
           contextAnalysis, 
           (chunk) => {
             setGeneratedContent((prev) => prev + chunk);
-          }
+          },
+          undefined, // storyAnalysis
+          model,
+          grokOptions,
+          magnumOptions
       );
     } catch (err) {
       setError("오류 발생");
@@ -602,18 +608,25 @@ function App() {
     try {
       const level = settings.creativityLevel || 3;
       const temp = 0.2 + (Math.max(1, Math.min(10, level)) - 1) * (0.7 / 9);
-      await continueStoryStream(generatedContent, (chunk) => setGeneratedContent((prev) => prev + chunk), temp);
+      const model = settings.selectedModel || settings.geminiModel || 'gemini-3-flash-preview';
+      const grokOptions = { apiKey: settings.grokApiKey || '' };
+      const magnumOptions = { apiKey: settings.magnumApiKey || '' };
+      
+      await continueStoryStream(generatedContent, (chunk) => setGeneratedContent((prev) => prev + chunk), temp, model, grokOptions, magnumOptions);
     } catch (err) { setError("오류 발생"); } finally { setIsLoading(false); }
-  }, [generatedContent, settings.creativityLevel]);
+  }, [generatedContent, settings.creativityLevel, settings.selectedModel, settings.geminiModel, settings.grokApiKey, settings.magnumApiKey]);
 
   const handleRefineGenContent = useCallback(async (instruction: string) => {
     if (!generatedContent) return;
     setIsLoading(true);
     try {
-      const refined = await refineText(generatedContent, instruction, settings.isMature);
+      const model = settings.selectedModel || settings.geminiModel || 'gemini-3-flash-preview';
+      const grokOptions = { apiKey: settings.grokApiKey || '' };
+      const magnumOptions = { apiKey: settings.magnumApiKey || '' };
+      const refined = await refineText(generatedContent, instruction, model, grokOptions, magnumOptions);
       setGeneratedContent(refined);
     } catch (e) { setError("오류 발생"); } finally { setIsLoading(false); }
-  }, [generatedContent, settings.isMature]);
+  }, [generatedContent, settings.selectedModel, settings.geminiModel, settings.grokApiKey, settings.magnumApiKey]);
 
   const createProject = (name: string) => {
     const newProject: Project = { 
@@ -1025,6 +1038,8 @@ function App() {
                           isMobile={true} 
                           lastSavedTime={lastSavedTime}
                           presets={globalSettings?.aiPresets && globalSettings.aiPresets.length > 0 ? globalSettings.aiPresets : DEFAULT_AI_PRESETS}
+                          model={settings.geminiModel}
+                          grokApiKey={settings.grokApiKey}
                        />
                   )}
               </div>
@@ -1057,7 +1072,6 @@ function App() {
                   onOpenProjectSettings={(p) => { setEditingProject(p); setIsProjectSettingsOpen(true); }}
                   onDeleteStory={deleteStory}
                   onSelectStory={loadStory}
-                  onOpenAssistant={() => {}}
                   onUpdateStory={(updated) => {
                        if (user) saveStoryToFirestore(user.uid, updated);
                        else setSavedStories(prev => prev.map(s => s.id === updated.id ? updated : s));
@@ -1122,6 +1136,7 @@ function App() {
                     onBack={() => checkUnsavedChanges(() => { setActiveProjectId(null); setCurrentView('HOME'); })} 
                     onSaveStyle={handleSaveStyle} 
                     checkApiKey={checkApiKey}
+                    settings={settings}
                 />;
             case 'AI_WRITER':
                 return (
@@ -1223,8 +1238,10 @@ function App() {
                             }
                         }
                       }} 
-                      onContinue={handleContinueGenerate} onRetry={handleRetry} onReset={handleResetViewer} isExistingStory={!!editingStoryId} goHome={() => checkUnsavedChanges(() => { setActiveProjectId(null); setCurrentView('HOME'); })} lastSavedTime={lastSavedTime} editorPrefs={editorPrefs} isMature={settings.isMature} isMobile={false}
+                      onContinue={handleContinueGenerate} onRetry={handleRetry} onReset={handleResetViewer} isExistingStory={!!editingStoryId} goHome={() => checkUnsavedChanges(() => { setActiveProjectId(null); setCurrentView('HOME'); })} lastSavedTime={lastSavedTime} editorPrefs={editorPrefs} isMobile={false}
                       presets={globalSettings?.aiPresets && globalSettings.aiPresets.length > 0 ? globalSettings.aiPresets : DEFAULT_AI_PRESETS}
+                      model={settings.geminiModel}
+                      grokApiKey={settings.grokApiKey}
                     />
                   </main>
                 </div>

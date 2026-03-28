@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Project, SavedStory, RefinedSynopsisCard, NovelSettings } from '../types.ts';
-import { X, Wand2, FileText, RefreshCw, Save, ArrowRight, Edit2, Check, Sparkles, Info, BookOpenCheck, AlertTriangle, CheckCircle2, RefreshCcw, FolderPlus, Upload, Flame, ToggleLeft, ToggleRight, AlignJustify } from 'lucide-react';
-import { refineSynopsisWithContext, refineText, analyzeProjectContext, analyzeSynopsisReference } from '../services/geminiService.ts';
+import { X, Wand2, FileText, RefreshCw, Save, ArrowRight, Edit2, Check, Sparkles, Info, BookOpenCheck, AlertTriangle, CheckCircle2, RefreshCcw, FolderPlus, Upload, Flame, ToggleLeft, ToggleRight, AlignJustify, Cpu } from 'lucide-react';
+import { refineSynopsisWithContext, refineText, analyzeProjectContext, analyzeSynopsisReference, AI_MODELS, isGrokModel, isMagnumModel } from '../services/geminiService.ts';
 import InputDialog from './InputDialog.tsx';
 
 interface SynopsisRefinerProps {
@@ -51,15 +51,11 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
 
   // --- Reference Style State ---
   const [referenceAnalysis, setReferenceAnalysis] = useState('');
-  const [isReferenceMature, setIsReferenceMature] = useState(false);
   const [isAnalyzingReference, setIsAnalyzingReference] = useState(false);
   const referenceFileRef = useRef<HTMLInputElement>(null);
 
-  // --- 19+ Mode Toggle for Refinement ---
-  const [isMatureMode, setIsMatureMode] = useState(false);
-
   // --- Model Selection ---
-  const [selectedModel, setSelectedModel] = useState<'gemini-3-flash-preview' | 'gemini-3.1-pro-preview'>('gemini-3-flash-preview');
+  const [selectedModel, setSelectedModel] = useState<string>(settings?.synopsisModel || settings?.geminiModel || 'gemini-3-flash-preview');
 
   const activeProject = projects.find(p => p.id === selectedProjectId);
 
@@ -111,7 +107,23 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
       reader.onload = async (event) => {
           const text = event.target?.result as string;
           try {
-              const analysis = await analyzeSynopsisReference(text, isReferenceMature);
+              // Prepare Grok Options
+              let grokOptions = undefined;
+              if (settings?.grokApiKey || activeProject?.settings?.grokApiKey) {
+                  grokOptions = {
+                      apiKey: settings?.grokApiKey || activeProject?.settings?.grokApiKey || ''
+                  };
+              }
+
+              // Prepare Magnum Options
+              let magnumOptions = undefined;
+              if (settings?.magnumApiKey || activeProject?.settings?.magnumApiKey) {
+                  magnumOptions = {
+                      apiKey: settings?.magnumApiKey || activeProject?.settings?.magnumApiKey || ''
+                  };
+              }
+
+              const analysis = await analyzeSynopsisReference(text, selectedModel, grokOptions, magnumOptions);
               setReferenceAnalysis(analysis);
           } catch(e) {
               alert("참조 파일 분석 실패");
@@ -131,7 +143,23 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
 
       setIsContextAnalyzing(true);
       try {
-          const result = await analyzeProjectContext(projectStories);
+          // Prepare Grok Options
+          let grokOptions = undefined;
+          if (settings?.grokApiKey || activeProject?.settings?.grokApiKey) {
+              grokOptions = {
+                  apiKey: settings?.grokApiKey || activeProject?.settings?.grokApiKey || ''
+              };
+          }
+
+          // Prepare Magnum Options
+          let magnumOptions = undefined;
+          if (settings?.magnumApiKey || activeProject?.settings?.magnumApiKey) {
+              magnumOptions = {
+                  apiKey: settings?.magnumApiKey || activeProject?.settings?.magnumApiKey || ''
+              };
+          }
+
+          const result = await analyzeProjectContext(projectStories, selectedModel, grokOptions, magnumOptions);
           if (result) {
               const lastUpdate = projectStories.length > 0 
                 ? Math.max(...projectStories.map(s => s.updatedAt || s.createdAt)) 
@@ -183,18 +211,25 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
           };
       }
 
-      // Pass the reference analysis as styleGuide
-      // Use isMatureMode from state for the override flag
+      // Prepare Magnum Options
+      let magnumOptions = undefined;
+      if (settings?.magnumApiKey || activeProject?.settings?.magnumApiKey) {
+          magnumOptions = {
+              apiKey: settings?.magnumApiKey || activeProject?.settings?.magnumApiKey || '',
+              model: settings?.magnumModel || activeProject?.settings?.magnumModel || 'anthracite-org/magnum-v4-72b'
+          };
+      }
+
       const result = await refineSynopsisWithContext(
           rawSynopsis, 
           activeProject || null, 
           recentStories, 
           preAnalyzedContext,
           "", // referenceAnalysis removed
-          isMatureMode, // Pass the toggle state
           grokOptions, // Pass the configured Grok options
           1, // targetChapterCount removed, default to 1
-          selectedModel // Pass selected model
+          selectedModel, // Pass selected model
+          magnumOptions // Pass Magnum options
       );
       setRefinedCards(result);
     } catch (e) {
@@ -209,8 +244,30 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
     if (checkApiKey && !checkApiKey()) return;
     setIsCardRefining(index);
     try {
+      // Prepare Grok Options
+      let grokOptions = undefined;
+      if (settings?.grokApiKey || activeProject?.settings?.grokApiKey) {
+          grokOptions = {
+              apiKey: settings?.grokApiKey || activeProject?.settings?.grokApiKey || ''
+          };
+      }
+
+      // Prepare Magnum Options
+      let magnumOptions = undefined;
+      if (settings?.magnumApiKey || activeProject?.settings?.magnumApiKey) {
+          magnumOptions = {
+              apiKey: settings?.magnumApiKey || activeProject?.settings?.magnumApiKey || ''
+          };
+      }
+
       // Just refine the summary as there are no instructions anymore
-      const refinedSummary = await refineText(card.summary, "Make this summary more detailed, include sensory details, and merge any technical instructions into the narrative.");
+      const refinedSummary = await refineText(
+          card.summary, 
+          "Make this summary more detailed, include sensory details, and merge any technical instructions into the narrative.",
+          selectedModel,
+          grokOptions,
+          magnumOptions
+      );
       
       const newCards = [...refinedCards];
       newCards[index] = { ...card, summary: refinedSummary };
@@ -333,40 +390,48 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
                    )}
                 </div>
 
-                {/* --- 19+ Mode Toggle --- */}
-                <div className={`p-4 rounded-xl border transition-all duration-300 ${isMatureMode ? 'bg-red-900/20 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.2)]' : 'bg-gray-800/50 border-gray-700'}`}>
-                    <div className="flex items-center justify-between cursor-pointer" onClick={() => setIsMatureMode(!isMatureMode)}>
-                        <span className={`text-sm font-bold flex items-center gap-2 ${isMatureMode ? 'text-red-400' : 'text-gray-400'}`}>
-                            <Flame size={16} /> 19금 전용 모드 {isMatureMode ? "ON" : "OFF"}
-                        </span>
-                        <div className={`flex items-center justify-center px-3 py-1 rounded-full font-bold text-xs transition-all duration-300 ${isMatureMode ? 'bg-red-500 text-white shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 'bg-gray-700 text-gray-400'}`}>
-                            {isMatureMode ? 'ON' : 'OFF'}
-                        </div>
-                    </div>
-                    {isMatureMode && <p className="text-[10px] text-red-400 mt-2">* 무한 확장(Infinite Expansion) 기법과 적나라한 묘사, 문체 변주가 적용됩니다. (Grok 사용)</p>}
-                </div>
+
 
                 {/* --- Model Selection --- */}
                 <div className="bg-gray-900/50 border border-gray-700 rounded-xl p-4">
                     <label className="text-sm font-bold text-gray-300 mb-3 block flex items-center gap-2">
                         <Sparkles size={14} className="text-blue-400" /> 분석 모델 선택
                     </label>
-                    <div className="grid grid-cols-2 gap-2">
-                        <button 
-                            onClick={() => setSelectedModel('gemini-3-flash-preview')}
-                            className={`py-2 rounded-lg border text-xs font-bold transition-all ${selectedModel === 'gemini-3-flash-preview' ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/20' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
-                        >
-                            Gemini 3 Flash
-                        </button>
-                        <button 
-                            onClick={() => setSelectedModel('gemini-3.1-pro-preview')}
-                            className={`py-2 rounded-lg border text-xs font-bold transition-all ${selectedModel === 'gemini-3.1-pro-preview' ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-500/20' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
-                        >
-                            Gemini 3.1 Pro
-                        </button>
+                    <div className="grid grid-cols-1 gap-2">
+                        <div className="grid grid-cols-2 gap-2">
+                            <button 
+                                onClick={() => setSelectedModel('gemini-3-flash-preview')}
+                                className={`py-2 rounded-lg border text-xs font-bold transition-all ${selectedModel === 'gemini-3-flash-preview' ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/20' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
+                            >
+                                Gemini 3 Flash
+                            </button>
+                            <button 
+                                onClick={() => setSelectedModel('gemini-3.1-pro-preview')}
+                                className={`py-2 rounded-lg border text-xs font-bold transition-all ${selectedModel === 'gemini-3.1-pro-preview' ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-500/20' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
+                            >
+                                Gemini 3.1 Pro
+                            </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <button 
+                                onClick={() => setSelectedModel('grok-3')}
+                                className={`py-2 rounded-lg border text-xs font-bold transition-all flex items-center justify-center gap-2 ${selectedModel === 'grok-3' ? 'bg-red-600 border-red-500 text-white shadow-lg shadow-red-500/20' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
+                            >
+                                <Cpu size={14} /> Grok 3
+                            </button>
+                            <button 
+                                onClick={() => setSelectedModel('anthracite-org/magnum-v4-72b')}
+                                className={`py-2 rounded-lg border text-xs font-bold transition-all flex items-center justify-center gap-2 ${selectedModel === 'anthracite-org/magnum-v4-72b' ? 'bg-orange-600 border-orange-500 text-white shadow-lg shadow-orange-500/20' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
+                            >
+                                <Flame size={14} /> Magnum v4
+                            </button>
+                        </div>
                     </div>
                     <p className="text-[10px] text-gray-500 mt-2">
-                        {selectedModel === 'gemini-3-flash-preview' ? "빠르고 가벼운 분석에 적합합니다." : "더 깊고 정교한 논리적 분석이 가능합니다."}
+                        {selectedModel === 'gemini-3-flash-preview' && "빠르고 가벼운 분석에 적합합니다."}
+                        {selectedModel === 'gemini-3.1-pro-preview' && "더 깊고 정교한 논리적 분석이 가능합니다."}
+                        {selectedModel === 'grok-3' && "강력한 추론 능력으로 복잡한 설정을 정교하게 다듬습니다."}
+                        {selectedModel === 'anthracite-org/magnum-v4-72b' && "문학적 표현과 창의적인 묘사가 뛰어난 모델입니다."}
                     </p>
                 </div>
 
@@ -388,11 +453,10 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
                 <button 
                    onClick={handleAnalyzeSynopsis}
                    disabled={isAnalyzing || !rawSynopsis.trim()}
-                   className={`w-full py-4 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 transition-all hover:scale-[1.02] 
-                        ${isMatureMode ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-purple-600 hover:bg-purple-500 text-white disabled:bg-gray-700 disabled:text-gray-500'}`}
+                   className="w-full py-4 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 transition-all hover:scale-[1.02] bg-purple-600 hover:bg-purple-500 text-white disabled:bg-gray-700 disabled:text-gray-500"
                 >
                    {isAnalyzing ? <RefreshCw className="animate-spin" /> : <Sparkles fill="currentColor" />}
-                   {isAnalyzing ? "AI가 분석 및 구조화 중..." : isMatureMode ? "19금 시놉시스 확장 시작" : "시놉시스 다듬기 시작"}
+                   {isAnalyzing ? "AI가 분석 및 구조화 중..." : "시놉시스 다듬기 시작"}
                 </button>
              </div>
           </div>

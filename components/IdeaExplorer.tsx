@@ -1,9 +1,9 @@
 
 // ... existing imports
 import React, { useState, useEffect, useRef } from 'react';
-import { Project, IdeaSession, ChatMessage, WorldItem, NovelSettings, SavedStory, CharacterProfile, SavedStyle } from '../types.ts';
-import { Lightbulb, Plus, MessageSquare, Trash2, Edit2, Send, Compass, Save, ArrowLeft, FolderPlus, RefreshCcw, X, Bot, User, FileText, Wand2, Sparkles, BookOpenCheck, CheckCircle2, ChevronDown, ChevronUp, LayoutList, ArrowRight, Maximize2, RotateCcw, Globe, UserPlus, Flame, BrainCircuit, Paperclip, Link, AlertTriangle, Book } from 'lucide-react';
-import { chatWithIdeaPartner, refineText, analyzeProjectContext, generateSynopsisOptions, expandDetailedSynopsis, organizeWorldviewFromChat, extractCharacterFromChat, analyzeWritingStyle } from '../services/geminiService.ts';
+import { Project, IdeaSession, ChatMessage, WorldItem, NovelSettings, SavedStory, CharacterProfile, SavedStyle, DEFAULT_SETTINGS } from '../types.ts';
+import { Lightbulb, Plus, MessageSquare, Trash2, Edit2, Send, Compass, Save, ArrowLeft, FolderPlus, RefreshCcw, X, Bot, User, FileText, Wand2, Sparkles, BookOpenCheck, CheckCircle2, ChevronDown, ChevronUp, LayoutList, ArrowRight, Maximize2, RotateCcw, Globe, UserPlus, Flame, BrainCircuit, Paperclip, Link, AlertTriangle, Book, Cpu } from 'lucide-react';
+import { chatWithIdeaPartner, refineText, analyzeProjectContext, generateSynopsisOptions, expandDetailedSynopsis, organizeWorldviewFromChat, extractCharacterFromChat, analyzeWritingStyle, AI_MODELS, isGrokModel } from '../services/geminiService.ts';
 import ReactMarkdown from 'react-markdown';
 import DeleteConfirmDialog from './DeleteConfirmDialog.tsx';
 import InputDialog from './InputDialog.tsx';
@@ -22,6 +22,7 @@ interface IdeaExplorerProps {
   onSaveStyle?: (style: SavedStyle) => void;
   savedStyles?: SavedStyle[];
   checkApiKey: () => boolean;
+  settings?: NovelSettings;
 }
 
 const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
@@ -36,7 +37,8 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
   onBack,
   onSaveStyle,
   savedStyles = [],
-  checkApiKey
+  checkApiKey,
+  settings
 }) => {
   // ... (state definitions unchanged)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -72,6 +74,9 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
 
   // Synopsis Draft Mode
   const [isSynopsisMode, setIsSynopsisMode] = useState(false);
+  
+  // Model Selection
+  const [selectedModel, setSelectedModel] = useState<string>(settings?.primaryModel || settings?.geminiModel || 'gemini-3-flash-preview');
   
   // Expansion Modal State
   const [expandedOption, setExpandedOption] = useState<{title: string, summary: string, appeal: string} | null>(null);
@@ -156,7 +161,19 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
       
       setIsAnalyzing(true);
       try {
-          const result = await analyzeProjectContext(projectStories);
+          // Prepare Grok Options
+          let grokOptions = undefined;
+          const activeSettings = activeProject?.settings || projects.find(p => p.id === activeProject.id)?.settings;
+          if (activeSettings?.grokApiKey) {
+              grokOptions = { apiKey: activeSettings.grokApiKey };
+          }
+
+          const result = await analyzeProjectContext(
+              projectStories, 
+              selectedModel, 
+              grokOptions,
+              settings?.magnumApiKey ? { apiKey: settings.magnumApiKey } : undefined
+          );
           if (result) {
               const lastUpdate = projectStories.length > 0 
                 ? Math.max(...projectStories.map(s => s.updatedAt || s.createdAt)) 
@@ -209,8 +226,24 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
     setIsLoading(true);
 
     try {
+      // Prepare Grok Options
+      let grokOptions = undefined;
+      const activeSettings = activeProject?.settings || projects.find(p => p.id === activeProject?.id)?.settings;
+      const effectiveGrokKey = activeSettings?.grokApiKey || settings?.grokApiKey;
+      
+      if (effectiveGrokKey) {
+          grokOptions = { apiKey: effectiveGrokKey };
+      }
+
       if (isSynopsisMode) {
-          const options = await generateSynopsisOptions(activeProject || null, userMsg.text, contextAnalysis || undefined);
+          const options = await generateSynopsisOptions(
+              activeProject || null, 
+              userMsg.text, 
+              contextAnalysis || undefined, 
+              selectedModel, 
+              grokOptions,
+              settings?.magnumApiKey ? { apiKey: settings.magnumApiKey } : undefined
+          );
           const aiMsg: ChatMessage = {
               id: (Date.now() + 1).toString(),
               role: 'model',
@@ -229,7 +262,10 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
               activeProject || null, 
               updatedSession.messages, 
               contextAnalysis || undefined,
-              attachedStyle?.description
+              attachedStyle?.description,
+              selectedModel,
+              grokOptions,
+              settings?.magnumApiKey ? { apiKey: settings.magnumApiKey } : undefined
           );
 
           // Parse Data Blocks
@@ -368,7 +404,21 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
       const requestText = lastUserMsg ? lastUserMsg.text : "새로운 시놉시스 옵션을 제안해줘";
       setIsLoading(true);
       try {
-          const options = await generateSynopsisOptions(activeProject || null, requestText + " (이전과 다른 새로운 옵션 3가지 제안)", contextAnalysis || undefined);
+          // Prepare Grok Options
+          let grokOptions = undefined;
+          const activeSettings = activeProject?.settings || projects.find(p => p.id === activeProject?.id)?.settings;
+          if (activeSettings?.grokApiKey) {
+              grokOptions = { apiKey: activeSettings.grokApiKey };
+          }
+
+          const options = await generateSynopsisOptions(
+              activeProject || null, 
+              requestText + " (이전과 다른 새로운 옵션 3가지 제안)", 
+              contextAnalysis || undefined, 
+              selectedModel, 
+              grokOptions,
+              settings?.magnumApiKey ? { apiKey: settings.magnumApiKey } : undefined
+          );
           const aiMsg: ChatMessage = { id: Date.now().toString(), role: 'model', text: "새로운 시놉시스 초안을 생성했습니다.", createdAt: Date.now(), metadata: { type: 'synopsis_options', options: options } };
           onUpdateSession({ ...activeSession, messages: [...activeSession.messages, aiMsg], updatedAt: Date.now() });
       } catch(e) { alert("재생성에 실패했습니다."); } finally { setIsLoading(false); }
@@ -383,7 +433,20 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
       onUpdateSession(updatedSession);
       setIsLoading(true);
       try {
-          const detailedText = await expandDetailedSynopsis(summary, activeProject || null);
+          // Prepare Grok Options
+          let grokOptions = undefined;
+          const activeSettings = activeProject?.settings || projects.find(p => p.id === activeProject?.id)?.settings;
+          if (activeSettings?.grokApiKey) {
+              grokOptions = { apiKey: activeSettings.grokApiKey };
+          }
+
+          const detailedText = await expandDetailedSynopsis(
+              summary, 
+              activeProject || null, 
+              selectedModel, 
+              grokOptions,
+              settings?.magnumApiKey ? { apiKey: settings.magnumApiKey } : undefined
+          );
           const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'model', text: `**[${title}] 상세 시놉시스**\n\n${detailedText}`, createdAt: Date.now() };
           onUpdateSession({ ...updatedSession, messages: [...updatedSession.messages, aiMsg], updatedAt: Date.now() });
           setIsSynopsisMode(false);
@@ -409,7 +472,19 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
       const chatText = activeSession.messages.map(m => `${m.role}: ${m.text}`).join('\n');
       
       try {
-          const newItems = await organizeWorldviewFromChat(chatText);
+          // Prepare Grok Options
+          let grokOptions = undefined;
+          const activeSettings = activeProject?.settings || projects.find(p => p.id === activeProject?.id)?.settings;
+          if (activeSettings?.grokApiKey) {
+              grokOptions = { apiKey: activeSettings.grokApiKey };
+          }
+
+          const newItems = await organizeWorldviewFromChat(
+              chatText, 
+              selectedModel, 
+              grokOptions,
+              settings?.magnumApiKey ? { apiKey: settings.magnumApiKey } : undefined
+          );
           if (newItems.length > 0) {
               if (confirm(`${newItems.length}개의 세계관 설정 카드를 추출했습니다. 저장하시겠습니까?`)) {
                   let currentItems: WorldItem[] = [];
@@ -457,7 +532,19 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
       // Increased context window from 10 to 50 for better inference
       const chatText = activeSession.messages.slice(-50).map(m => `${m.role}: ${m.text}`).join('\n');
       try {
-          const profile = await extractCharacterFromChat(chatText);
+          // Prepare Grok Options
+          let grokOptions = undefined;
+          const activeSettings = activeProject?.settings || projects.find(p => p.id === activeProject?.id)?.settings;
+          if (activeSettings?.grokApiKey) {
+              grokOptions = { apiKey: activeSettings.grokApiKey };
+          }
+
+          const profile = await extractCharacterFromChat(
+              chatText, 
+              selectedModel, 
+              grokOptions,
+              settings?.magnumApiKey ? { apiKey: settings.magnumApiKey } : undefined
+          );
           if (profile) {
               if (confirm(`캐릭터 '${profile.name}' 프로필을 생성했습니다. 저장하시겠습니까?`)) {
                   let currentChars: CharacterProfile[] = [];
@@ -508,7 +595,19 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
       setIsSavingStyle(true);
       const chatText = activeSession.messages.map(m => m.text).join('\n');
       try {
-          const result = await analyzeWritingStyle(chatText);
+          // Prepare Grok Options
+          let grokOptions = undefined;
+          const activeSettings = activeProject?.settings || projects.find(p => p.id === activeProject?.id)?.settings;
+          if (activeSettings?.grokApiKey) {
+              grokOptions = { apiKey: activeSettings.grokApiKey };
+          }
+
+          const result = await analyzeWritingStyle(
+              chatText, 
+              selectedModel, 
+              grokOptions,
+              settings?.magnumApiKey ? { apiKey: settings.magnumApiKey } : undefined
+          );
           setStyleSaveDialog({ isOpen: true, content: result });
       } catch(e) {
           alert("스타일 분석 실패");
@@ -591,6 +690,37 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
 
                         {/* 2. Context Analysis Button */}
                         <div className="flex-shrink-0 flex items-end gap-2">
+                             {/* Model Selection */}
+                             <div className="flex flex-col items-end mr-2">
+                                 <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Model</div>
+                                 <div className="flex bg-[#252525] border border-gray-700 rounded-lg p-1">
+                                     <button 
+                                         onClick={() => setSelectedModel('gemini-3-flash-preview')}
+                                         className={`px-2 py-1 text-[10px] font-bold rounded ${selectedModel === 'gemini-3-flash-preview' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                                     >
+                                         Flash
+                                     </button>
+                                     <button 
+                                         onClick={() => setSelectedModel('gemini-3.1-pro-preview')}
+                                         className={`px-2 py-1 text-[10px] font-bold rounded ${selectedModel === 'gemini-3.1-pro-preview' ? 'bg-purple-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                                     >
+                                         Pro
+                                     </button>
+                                     <button 
+                                         onClick={() => setSelectedModel('grok-3')}
+                                         className={`px-2 py-1 text-[10px] font-bold rounded ${selectedModel === 'grok-3' ? 'bg-red-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                                     >
+                                         Grok 3
+                                     </button>
+                                     <button 
+                                         onClick={() => setSelectedModel('anthracite-org/magnum-v4-72b')}
+                                         className={`px-2 py-1 text-[10px] font-bold rounded ${selectedModel === 'anthracite-org/magnum-v4-72b' ? 'bg-orange-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                                     >
+                                         Magnum
+                                     </button>
+                                 </div>
+                             </div>
+
                              {/* Stale Warning Badge */}
                              {isContextStale && (
                                 <div className="text-[10px] bg-yellow-900/30 text-yellow-400 px-2 py-1 rounded border border-yellow-500/30 flex items-center gap-1 animate-pulse">

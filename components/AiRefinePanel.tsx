@@ -10,7 +10,6 @@ interface AiRefinePanelProps {
   currentText: string;
   onRefine: (instruction: string) => Promise<void>;
   isRefining: boolean;
-  isMature: boolean;
   disabled?: boolean;
   className?: string;
   presets?: AiPreset[]; // Optional, falls back to defaults if not provided
@@ -20,7 +19,6 @@ const AiRefinePanel: React.FC<AiRefinePanelProps> = ({
   currentText,
   onRefine,
   isRefining,
-  isMature,
   disabled = false,
   className = "",
   presets = DEFAULT_AI_PRESETS
@@ -45,7 +43,7 @@ const AiRefinePanel: React.FC<AiRefinePanelProps> = ({
       if (lower.includes('가독성') || lower.includes('readability')) return <AlignLeft size={12} />;
       if (lower.includes('삭제') || lower.includes('erase') || lower.includes('remove')) return <Eraser size={12} />;
       if (lower.includes('늘리기') || lower.includes('expand') || lower.includes('분량')) return <Maximize2 size={12} />;
-      if (lower.includes('수위') || lower.includes('19') || lower.includes('mature')) return <Flame size={12} />;
+      if (lower.includes('수위') || lower.includes('19')) return <Flame size={12} />;
       return <Star size={12} />;
   };
 

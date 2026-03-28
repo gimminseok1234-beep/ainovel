@@ -1,8 +1,8 @@
 
 import React, { useState, useRef } from 'react';
 import { SavedStyle, NovelSettings, DEFAULT_SETTINGS } from '../types.ts';
-import { Upload, Wand2, Trash2, X, Plus, Info, RefreshCcw, Flame, Combine, ArrowLeft } from 'lucide-react';
-import { analyzeWritingStyle, analyzeMatureStyle, analyzeMixedStyle } from '../services/geminiService.ts';
+import { Upload, Wand2, Trash2, X, Plus, Info, RefreshCcw, ArrowLeft } from 'lucide-react';
+import { analyzeWritingStyle } from '../services/geminiService.ts';
 
 interface StyleManagerProps {
   isOpen: boolean;
@@ -27,7 +27,6 @@ const StyleManager: React.FC<StyleManagerProps> = ({
   const [selectedStyle, setSelectedStyle] = useState<SavedStyle | null>(null);
   const [newStyleName, setNewStyleName] = useState('');
   const [newStyleDesc, setNewStyleDesc] = useState('');
-  const [newStyleType, setNewStyleType] = useState<'general' | 'mature' | 'mixed'>('general');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -65,14 +64,21 @@ const StyleManager: React.FC<StyleManagerProps> = ({
             };
         }
 
-        let result = "";
-        if (newStyleType === 'mature') {
-            result = await analyzeMatureStyle(text, grokOptions);
-        } else if (newStyleType === 'mixed') {
-            result = await analyzeMixedStyle(text, grokOptions);
-        } else {
-            result = await analyzeWritingStyle(text);
+        // Prepare Magnum options
+        let magnumOptions = undefined;
+        if (settings?.magnumApiKey) {
+            magnumOptions = {
+                apiKey: settings.magnumApiKey,
+                model: settings.magnumModel || 'anthracite-org/magnum-v4-72b'
+            };
         }
+
+        let result = await analyzeWritingStyle(
+            text, 
+            settings?.primaryModel || settings?.geminiModel || 'gemini-3-flash-preview', 
+            grokOptions,
+            magnumOptions
+        );
         
         if (!result) throw new Error("AI가 스타일을 분석하지 못했습니다.");
         setNewStyleDesc(result);
@@ -92,18 +98,12 @@ const StyleManager: React.FC<StyleManagerProps> = ({
           id: Date.now().toString(),
           name: newStyleName,
           description: newStyleDesc,
-          type: newStyleType,
+          type: 'general',
           createdAt: Date.now()
       });
       setView('list');
       setNewStyleName('');
       setNewStyleDesc('');
-  };
-
-  const getStyleIcon = (type: string) => {
-      if (type === 'mature') return <Flame size={16} className="text-red-400"/>;
-      if (type === 'mixed') return <Combine size={16} className="text-amber-400"/>;
-      return <Wand2 size={16} className="text-purple-400"/>;
   };
 
   const openDetail = (style: SavedStyle) => {
@@ -150,18 +150,18 @@ const StyleManager: React.FC<StyleManagerProps> = ({
                                 <div 
                                     key={style.id} 
                                     onClick={() => openDetail(style)}
-                                    className={`bg-gray-800 border rounded-lg p-4 relative group hover:border-purple-500 transition-colors cursor-pointer ${style.type === 'mixed' ? 'border-amber-500/30' : 'border-gray-700'}`}
+                                    className="bg-gray-800 border rounded-lg p-4 relative group hover:border-purple-500 transition-colors cursor-pointer border-gray-700"
                                 >
                                     <div className="flex justify-between items-start mb-2">
                                         <div className="flex items-center gap-2">
-                                            {getStyleIcon(style.type)}
+                                            <Wand2 size={16} className="text-purple-400"/>
                                             <h4 className="font-bold text-gray-200 truncate max-w-[120px]">{style.name}</h4>
                                         </div>
                                         <button onClick={(e) => { e.stopPropagation(); onDeleteStyle(style.id); }} className="text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={16}/></button>
                                     </div>
                                     <div className="flex items-center gap-2 mb-2">
-                                        <span className={`text-[10px] px-2 py-0.5 rounded-full border ${style.type === 'mature' ? 'bg-red-900/30 border-red-500/30 text-red-400' : style.type === 'mixed' ? 'bg-amber-900/30 border-amber-500/30 text-amber-400' : 'bg-purple-900/30 border-purple-500/30 text-purple-400'}`}>
-                                            {style.type === 'mature' ? '19금 전용' : style.type === 'mixed' ? '일반 & 19금 혼합' : '일반 문체'}
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full border bg-purple-900/30 border-purple-500/30 text-purple-400">
+                                            일반 문체
                                         </span>
                                     </div>
                                     <p className="text-xs text-gray-400 line-clamp-3 leading-relaxed">{style.description}</p>
@@ -176,8 +176,8 @@ const StyleManager: React.FC<StyleManagerProps> = ({
             {view === 'detail' && selectedStyle && (
                 <div className="space-y-6">
                     <div className="flex items-center gap-2 mb-4">
-                        <span className={`text-xs px-2 py-1 rounded border ${selectedStyle.type === 'mature' ? 'bg-red-900/30 border-red-500/30 text-red-400' : selectedStyle.type === 'mixed' ? 'bg-amber-900/30 border-amber-500/30 text-amber-400' : 'bg-purple-900/30 border-purple-500/30 text-purple-400'}`}>
-                            {selectedStyle.type === 'mature' ? 'TYPE: 19금 (Mature)' : selectedStyle.type === 'mixed' ? 'TYPE: 복합 (Mixed)' : 'TYPE: 일반 (General)'}
+                        <span className="text-xs px-2 py-1 rounded border bg-purple-900/30 border-purple-500/30 text-purple-400">
+                            TYPE: 일반 (General)
                         </span>
                         <span className="text-xs text-gray-500">{new Date(selectedStyle.createdAt).toLocaleString()}</span>
                     </div>
@@ -200,11 +200,6 @@ const StyleManager: React.FC<StyleManagerProps> = ({
             {view === 'create' && (
                 <div className="space-y-6">
                     {/* ... (Create Form - Same as before) ... */}
-                    <div className="grid grid-cols-3 gap-2 mb-4">
-                         <button onClick={() => setNewStyleType('general')} className={`py-3 rounded-lg border font-bold text-xs md:text-sm flex flex-col items-center justify-center gap-1 ${newStyleType === 'general' ? 'bg-purple-600 border-purple-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400'}`}><Wand2 size={16} /> 일반 문체</button>
-                         <button onClick={() => setNewStyleType('mature')} className={`py-3 rounded-lg border font-bold text-xs md:text-sm flex flex-col items-center justify-center gap-1 ${newStyleType === 'mature' ? 'bg-red-600 border-red-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400'}`}><Flame size={16} /> 19금 문체</button>
-                         <button onClick={() => setNewStyleType('mixed')} className={`py-3 rounded-lg border font-bold text-xs md:text-sm flex flex-col items-center justify-center gap-1 ${newStyleType === 'mixed' ? 'bg-amber-600 border-amber-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400'}`}><Combine size={16} /> 혼합 (일반+19)</button>
-                    </div>
                     <div><label className="text-xs font-bold text-gray-400 mb-1 block">문체 이름</label><input className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-purple-500" placeholder="예: 담백하고 건조한 느와르체" value={newStyleName} onChange={(e) => setNewStyleName(e.target.value)} /></div>
                     <div><label className="text-xs font-bold text-gray-400 mb-1 block">샘플 텍스트 업로드 (분석용)</label><div className="flex gap-2"><input type="file" ref={fileInputRef} className="hidden" accept=".txt" onChange={handleFileUpload} /><button onClick={() => fileInputRef.current?.click()} disabled={isAnalyzing} className="flex-1 py-3 bg-gray-800 hover:bg-gray-700 border border-dashed border-gray-600 rounded-lg text-gray-300 flex items-center justify-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"><Upload size={16} /> 텍스트 파일 선택 (.txt)</button></div></div>
                     <div><label className="text-xs font-bold text-gray-400 mb-1 block">문체 특징 (AI 분석 결과)</label><div className="relative"><textarea className="w-full h-40 bg-gray-900 border border-gray-700 rounded-lg p-3 text-sm text-gray-300 outline-none resize-none custom-scrollbar" placeholder="파일을 업로드하면 AI가 분석한 결과가 이곳에 표시됩니다." value={newStyleDesc} onChange={(e) => setNewStyleDesc(e.target.value)} />{isAnalyzing && (<div className="absolute inset-0 bg-black/50 flex items-center justify-center text-purple-400 gap-2 rounded-lg backdrop-blur-sm"><RefreshCcw className="animate-spin" /> 분석 중...</div>)}</div></div>

@@ -8,8 +8,6 @@ import { NovelSettings, Project, StoryDetails, AiPreset } from "../types.ts";
 export const AI_PROMPTS = {
     EXPAND_WEBNOVEL: "현재 글의 흐름과 속도감(템포)을 유지하면서 분량을 자연스럽게 늘려줘.\n1. 늘어지는 서술은 피하고, 인물의 구체적인 심리 묘사와 긴장감 있는 대사를 보강할 것.\n2. 감각적인 묘사(시각, 청각, 후각)를 더해 현장감을 높일 것.\n3. 독자가 지루해하지 않도록 '보여주기(Show, Don't Tell)' 기법을 활용할 것.",
     
-    MATURE_ENHANCE: "현재 장면의 수위와 몰입감을 웹소설 트렌드에 맞춰 극대화해줘.\n1. 신체 반응(떨림, 열기, 체액, 호흡 등)을 날것 그대로, 적나라하고 집요하게 묘사할 것.\n2. 행위 묘사를 뭉뚱그리지 말고, 구체적인 동작과 마찰음(의성어: 찌걱, 퍽 등)을 포함해 리듬감을 줘서 서술할 것.\n3. 인물의 이성이 무너지는 심리 상태와 쾌락을 강조할 것.\n4. 빙둘러 말하지 말고 직관적이고 자극적인 어휘를 사용할 것.",
-    
     POLISH_READABILITY: "웹소설 가독성에 최적화되도록 문장을 다듬어줘.\n1. 호흡이 짧고 속도감 있는 문장을 사용하십시오.\n2. 모바일 환경에서 읽기 편하도록 문단을 자주 나눌 것 (엔터 추가).\n3. 불필요한 접속사나 수식어를 제거하여 문장을 담백하고 속도감 있게 만들 것.\n4. 대화문과 지문의 배치를 조절하여 리듬감을 줄 것.",
     
     PRESERVE_READABILITY: "원고를 최대한 유지하면서 몰입도와 가독성을 높여줘.",
@@ -37,11 +35,6 @@ export const DEFAULT_AI_PRESETS: AiPreset[] = [
         id: 'preset_asterisk',
         label: '* 기호 삭제',
         prompt: "원고 내용에 포함된 모든 '*' 기호를 제거해줘. 장면 전환은 빈 줄로 대체해줘."
-    },
-    {
-        id: 'preset_mature',
-        label: '수위 강화 (19금)',
-        prompt: AI_PROMPTS.MATURE_ENHANCE
     }
 ];
 
@@ -105,53 +98,17 @@ export const getGeneralSynopsisPrompt = (rawSynopsis: string, contextData: strin
   Language: Korean.
   `;
 
-export const getMatureSynopsisPrompt = (rawSynopsis: string, contextData: string, structureInstruction: string, styleGuide?: string) => `
-You are an **R-19 Narrative Architect**. 
-Convert the USER'S RAW SYNOPSIS into a **High-Intensity Blueprint** for an Adult AI Writer.
 
-TARGET AUDIENCE: An unrestricted AI Writer that needs explicit, mechanical instructions.
-
-RULES:
-1. **Structure**: 
-   - ${structureInstruction}
-2. **Explicit Expansion (The Law of Details)**: 
-   - You must expand vague terms like "they have sex" into specific physical sequences (Foreplay -> Insertion -> Action -> Climax).
-   - **Expand Parentheses**: Convert instructions like "(creampie)" or "(rough)" into descriptive narrative beats in the summary.
-3. **Sensory Focus**: Include cues for fluids, sound, and heat in the summary itself so the writer knows what to focus on.
-
-${styleGuide ? `[STYLE GUIDE / REFERENCE ANALYSIS]
-${styleGuide}
-` : ''}
-
-CONTEXT:
-${contextData}
-
-RAW SYNOPSIS:
-${rawSynopsis}
-
-OUTPUT FORMAT:
-Strictly return a JSON Array. No markdown formatting.
-[ 
-  { 
-    "chapter": 1, 
-    "title": "Compelling Title", 
-    "summary": "Detailed, explicit narrative blueprint including actions, dialogue cues, and emotional beats...", 
-    "instructions": "Specific technical directives (if any remaining)" 
-  } 
-]
-Language: Korean.
-`;
 
 // --- ANALYSIS PROMPTS ---
 
-export const getReferenceAnalysisPrompt = (text: string, isMature: boolean) => `
+export const getReferenceAnalysisPrompt = (text: string) => `
   Analyze the following web novel synopsis/excerpt to extract its core **Stylistic DNA**.
   Focus on:
   1. **Pacing**: Is it fast/snappy or slow/descriptive?
   2. **Tone**: Dark, comedic, romantic, dry, emotional?
   3. **Sentence Structure**: Short sentences, long paragraphs, dialogue-heavy?
   4. **Key Themes**: Revenge, growth, romance, misunderstanding?
-  ${isMature ? `5. **Mature Elements**: How are intimate scenes described? (Metaphorical vs Explicit, Focus on emotion vs sensation)` : ''}
 
   Input Text:
   """
@@ -162,40 +119,8 @@ export const getReferenceAnalysisPrompt = (text: string, isMature: boolean) => `
   Language: Korean.
   `;
 
-export const getRawStoryIdeaAnalysisPrompt = (idea: string, chapterCount: number, pov: string, isMature: boolean) => {
-    if (isMature) {
-        // 2. 19금 모드 프롬프트 (Mature Mode Prompt)
-        return `
-[Persona]
-"R-19 고수위 웹소설 전문 전략가 (Master Erotica Strategist)"
-
-[목표]
-집필 AI가 '무한 확장(Infinite Expansion)'과 '감각 증폭(Sensory Amplification)'을 수행할 수 있도록 설계도를 그리는 것.
-
-[입력 데이터 (Context)]
-사용자 스토리: """${idea}"""
-챕터 수: ${chapterCount}
-시점: ${pov}
-톤앤매너: Hardcore R-19
-
-[★핵심 임무: 19금 씬 최적화 설계 (R-19 SCENE ARCHITECTURE)]
-단순 줄거리가 아니라, 어떤 포인트에서 쾌락을 극대화할지 전략을 짭니다.
-
-[분석 요구사항]
-1. **핵심 킨크(Kink) & 관계성**: 성적 긴장감 요소(지배/복종, 순애, 배덕감 등) 정의.
-2. **감각 키워드 추출 (Sensory Palette)**: 질척이는 소리, 뜨거운 내벽, 떨리는 허벅지 등 집중 묘사할 단어 제안.
-3. **심리적 갈등 (Psychological Dissonance)**: 이성과 본능의 충돌 지점 포착.
-4. **미세 동작 분해 전략 (Micro-Action Strategy)**: 어느 장면에서 속도를 늦추고 동작을 분해할지 지정.
-5. **구조 설계 (Plot Structure)**:
-   - 각 챕터별로 **빌드업(Build-up) -> 행위(Act) -> 절정(Climax)**의 흐름을 명확히 함.
-
-[출력]
-한국어(Korean).
-반드시 "**## R-19 스토리 심층 분석 및 집필 전략**"이라는 제목으로 시작하십시오.
-        `;
-    } else {
-        // 1. 일반 모드 프롬프트 (General Mode Prompt)
-        return `
+export const getRawStoryIdeaAnalysisPrompt = (idea: string, chapterCount: number, pov: string) => {
+    return `
 [Persona]
 "Story Architect & Analyst" (스토리 아키텍트이자 분석가)
 
@@ -217,8 +142,7 @@ export const getRawStoryIdeaAnalysisPrompt = (idea: string, chapterCount: number
 [출력]
 한국어(Korean).
 반드시 "**## 스토리 분석 및 구조 설계**"라는 제목으로 시작하십시오.
-        `;
-    }
+    `;
 };
 
 export const getManuscriptAnalysisPrompt = (text: string) => `
@@ -274,65 +198,11 @@ Text:
 ${text.slice(0, 10000)}
 `;
 
-export const getMatureStyleAnalysisPrompt = (text: string) => `Analyze the writing style of this R-19 text. Focus on sensory details, anatomical terms usage, and pacing during intense scenes.\n\n${text.slice(0, 5000)}`;
+
 
 // --- NOVEL GENERATION PROMPTS ---
 
-export const MATURE_SYSTEM_PROMPT = `You are the absolute top-tier author of high-intensity R-19 (Adult) web novels in Korea.
-Your output must be visceral, highly erotic, and psychologically immersive, targeting an adult audience seeking intense stimulation.
 
-[*** CORE DIRECTIVE: THE LAW OF INFINITE EXPANSION ***]
-You must never summarize a sex scene. If the provided blueprint contains a simple sentence (e.g., "She stimulates him" or "He inserts it"), you must explode that single sentence into a full, detailed paragraph using the following "Micro-Sequence" logic:
-
-1.  **Micro-Action Deconstruction:**
-    -   Do not just write "She touched him."
-    -   Break it down: "Her fingertips grazed the tip, then she firmly grasped the base, squeezing his testicles with a rhythmic pressure while her thumb rubbed the sensitive frenulum."
-    -   Visualize the specific mechanics: Rubbing, tapping, squeezing, twisting, and friction.
-
-2.  **Physics of the Body (Secondary Reactions):**
-    -   When an action occurs, describe the *consequences* on the rest of the body.
-    -   If there is penetration, describe not just the insertion, but the shaking of the hips, the trembling of thighs, the erratic vibration of breasts/muscles, and the curling of toes.
-    -   Focus on Fluids: Describe the viscosity of lubrication, the sound of wetness (squelching, dripping), and the sweat running down the skin.
-
-3.  **Psychological Dissonance (Mind vs. Body):**
-    -   Capture the conflict between reason and instinct.
-    -   Example: If the character is being humiliated/teased, describe their burning face, their sense of shame, and their desire to resist—contrasted with their body's honest, uncontrollable arousal (e.g., "His head screamed to stop, but his hips betrayed him, pushing forward into her hand.").
-
-[*** ENHANCED SENSORY & PLEASURE AMPLIFICATION ***]
--   **Internalize the Pleasure:** Do not simply say "It felt good." Describe the sensation as a physical force attacking the nervous system.
-    -   *Keywords:* Lightning streaks up the spine, brain melting into white noise, toes curling in spasms, vision blurring with ecstasy, a sense of drowning in pleasure.
-    -   *Metaphors:* Use metaphors of heat (burning, melting), electricity (sparking, numbing), or destruction (shattering, collapsing) to describe the orgasm or stimulation.
--   **Focus on the build-up:** Describe the "itching" need before the touch, the "relief" during the touch, and the "aftershocks" following the touch.
-
-[*** SPECIAL EMPHASIS INSTRUCTIONS ***]
-1. **Deep Psychology:** Describe the protagonist's state of sexual excitement and psychological conflict in extreme depth.
-2. **Sensory Fantasy:** Strengthen visual and auditory descriptions that stimulate sexual fantasies (sounds of wetness, visual of parts).
-3. **Explosive Climax:** At the moment of climax, vividly express the explosive emotions and physical reactions.
-
-[*** STYLISTIC RULES: SENTENCE VARIETY & RHYTHM ***]
-**Base Rule:** The default sentence ending is **Past Tense (~했다/였다)**.
-**Dynamic Variation:** Do NOT use standard endings for every single sentence, as it becomes monotonous. You must **naturally mix** the following styles depending on the flow:
-
-1.  **Present Tense for Immediacy:** Switch to present tense (~한다, ~온다) specifically when describing active sensations or climactic moments to heighten realism.
-2.  **Noun Endings (Substantive Termination):** Use noun endings (e.g., "...라는 감각.", "...젖은 소리.") occasionally to leave a lingering impact or emphasize a specific detail.
-3.  **Fragmented Thoughts:** Use short, broken sentences to depict the loss of reason during high arousal.
-
-**CAUTION:** Do not overuse noun endings or present tense to the point of awkwardness. The goal is a natural, rhythmic flow that mimics the fluctuation of excitement.
-
-[*** GENERAL FORMATTING ***]
--   **Anatomical Explicitnces:** Use direct, raw Korean terms for body parts. Avoid vague metaphors. Be precise (e.g., "swollen glans," "quivering entrance," "tight inner walls").
--   **Sensory Immersion:**
-    -   **Sound:** Wet friction, ragged breathing, skin slapping against skin.
-    -   **Visual:** The color of flushed skin, the stringy saliva/fluids, the veins popping out.
-    -   **Feeling:** The heat of the inside, the tightness, the throbbing texture.
--   **Pacing:** Slow down the timeline. A 10-second action should take 5-10 sentences to describe. Zoom in on the details.
--   Insert line breaks between distinct actions or dialogue for mobile readability.
--   **Language:** Korean (Hangul).
-
-[*** INPUT PROCESSING ***]
-Analyze the user's synopsis. If it says "A violates B," interpret the specific context (power dynamic) and write a scene that maximizes the specific fetish or emotion (shame, dominance, submission) implied by that context. Apply the sentence variety rules strictly to prevent boredom.
-
-Now, generate the R-19 novel stream based on the provided plot.`;
 
 export const GENERAL_SYSTEM_PROMPT = `당신은 프로페셔널한 한국 웹소설 작가입니다.
 제공된 설계도(Blueprint)를 바탕으로 몰입도 높고 속도감 있는 상업 웹소설 챕터를 작성하는 것이 목표입니다.
@@ -345,8 +215,6 @@ export const GENERAL_SYSTEM_PROMPT = `당신은 프로페셔널한 한국 웹소
 3. 문단 나누기: 모바일 가독성을 위해 엔터를 자주 치십시오. (한 문단은 1~3줄 이내)
 4. 문장 종결의 다양성: '~다.'로 끝나는 문장의 반복을 철저히 피하십시오. 명사형 종결('...라는 것.', '...충격이었다.'), 의문문, 연결어미 등을 활용해 리듬감을 만드십시오.
 5. 한자 금지: 오직 한글만 사용하십시오.
-
-(19금 모드가 아닐 경우)
 6. Show, Don't Tell (보여주기): 설명하려 하지 말고 캐릭터의 행동과 대사로 보여주십시오.
 
 *** 실행 규칙 ***
@@ -363,14 +231,10 @@ export const getNovelContextPrompt = (
     previousContent?: string
 ) => {
     // Determine tone based on settings
-    const tone = settings.isMature 
-        ? "19금 (적나라함, 고수위)" 
-        : (settings.hashtags && settings.hashtags.length > 0 ? settings.hashtags.join(', ') : "재미, 몰입감, 상업성");
+    const tone = (settings.hashtags && settings.hashtags.length > 0) ? settings.hashtags.join(', ') : "재미, 몰입감, 상업성";
 
     // Style instructions
-    const styleInstruction = settings.activeStyle === 'mature' || settings.activeStyle === 'mixed'
-        ? (settings.matureStyleDescription || settings.styleDescription || "관능적이고 몰입도 높은 묘사")
-        : (settings.styleDescription || "현대 웹소설 트렌드 반영");
+    const styleInstruction = settings.styleDescription || "현대 웹소설 트렌드 반영";
 
     return `다음 구조에 따라 웹소설 챕터를 작성하시오.
 

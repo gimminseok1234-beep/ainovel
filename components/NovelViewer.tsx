@@ -23,9 +23,10 @@ interface NovelViewerProps {
   onToggleMobileMenu?: () => void;
   lastSavedTime?: number | null;
   editorPrefs?: EditorPreferences;
-  isMature?: boolean;
   isMobile?: boolean;
   presets?: AiPreset[]; // Pass presets
+  model?: string;
+  grokApiKey?: string;
 }
 
 const NovelViewer: React.FC<NovelViewerProps> = ({ 
@@ -45,9 +46,10 @@ const NovelViewer: React.FC<NovelViewerProps> = ({
   onToggleMobileMenu,
   lastSavedTime,
   editorPrefs,
-  isMature = false,
   isMobile = false,
-  presets = DEFAULT_AI_PRESETS
+  presets = DEFAULT_AI_PRESETS,
+  model = 'gemini-3-flash-preview',
+  grokApiKey = ''
 }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [isRefining, setIsRefining] = useState(false);
@@ -126,7 +128,7 @@ const NovelViewer: React.FC<NovelViewerProps> = ({
 
     setIsRefining(true);
     try {
-      const refined = await refineText(content, instruction, isMature);
+      const refined = await refineText(content, instruction, model, { apiKey: grokApiKey });
       
       // 2. Update Content
       setContent(refined);
@@ -369,7 +371,6 @@ const NovelViewer: React.FC<NovelViewerProps> = ({
                     currentText={content}
                     onRefine={handleRefine}
                     isRefining={isRefining}
-                    isMature={isMature}
                     disabled={isLoading}
                     presets={presets}
                 />

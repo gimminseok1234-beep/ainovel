@@ -5,10 +5,11 @@
 
 // ... existing imports ...
 import React, { useState, useRef } from 'react';
-import { BookOpen, Globe, UserPlus, Edit3, Plus, Trash2, Settings, FileText, PenTool, MessageSquare, Zap, FolderOpen, FileSearch, RefreshCcw, Compass, X, Sliders, Info, CheckCircle, AlertTriangle, Sparkles, Save, Download, Upload, Check, Wand2, CheckCircle2, Flame, Library, LayoutTemplate, Cpu, ListPlus, Edit2 } from 'lucide-react';
+import { BookOpen, Globe, UserPlus, Edit3, Plus, Trash2, Settings, FileText, PenTool, MessageSquare, Zap, FolderOpen, FileSearch, RefreshCcw, Compass, X, Sliders, Info, CheckCircle, AlertTriangle, Sparkles, Save, Download, Upload, Check, Wand2, CheckCircle2, Flame, Library, LayoutTemplate, Cpu, ListPlus, Edit2, Bot } from 'lucide-react';
 import { Project, SavedStory, ViewMode, NovelSettings, EditorPreferences, SavedStyle, DEFAULT_SETTINGS, AiPreset } from '../types.ts';
 import { User } from '../services/firebase.ts';
 import { DEFAULT_AI_PRESETS } from '../services/prompts.ts';
+import { AI_MODELS } from '../services/geminiService.ts';
 import UserMenu from './UserMenu.tsx';
 import StyleManager from './StyleManager.tsx';
 import SynopsisRefiner from './SynopsisRefiner.tsx';
@@ -25,7 +26,6 @@ interface HomeScreenProps {
   onOpenProjectSettings: (project: Project) => void;
   onDeleteStory: (id: string) => void;
   onSelectStory: (story: SavedStory) => void;
-  onOpenAssistant: () => void;
   onUpdateStory: (story: SavedStory) => void;
   onExternalSave: (title: string, content: string, projectId: string, settings?: NovelSettings, category?: 'manuscript' | 'synopsis') => void;
   onOpenProject?: (project: Project) => void;
@@ -58,7 +58,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
   onOpenProjectSettings,
   onDeleteStory,
   onSelectStory,
-  onOpenAssistant,
   onUpdateStory,
   onExternalSave,
   onOpenProject,
@@ -532,6 +531,29 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
                               <Sparkles size={14}/> AI 설정
                           </h4>
                           <div className="space-y-6">
+                              {/* Granular Model Selection */}
+                              <div className="p-4 bg-gray-800/50 rounded-xl border border-gray-700 space-y-4">
+                                  <h5 className="text-sm font-bold text-gray-200 flex items-center gap-2">
+                                      <Sliders size={14} className="text-indigo-400" /> 기본 AI 모델 설정
+                                  </h5>
+                                  
+                                  <div className="space-y-3">
+                                      <div>
+                                          <label className="text-[10px] font-medium text-gray-400 mb-1 block">기본 모델 (아이디어, 세계관 등)</label>
+                                          <select 
+                                              className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-gray-200 outline-none focus:border-purple-500"
+                                              value={settings.primaryModel || 'gemini-3-flash-preview'}
+                                              onChange={(e) => handleGrokSettingChange('primaryModel', e.target.value)}
+                                          >
+                                              {AI_MODELS.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                          </select>
+                                      </div>
+                                  </div>
+                                  <p className="text-[10px] text-gray-500 mt-1">
+                                      아이디어 탐색, 세계관 구축 등 기본 기능에 사용될 모델을 선택합니다. 원고 집필 및 시놉시스 다듬기 모델은 해당 기능 내에서 직접 선택할 수 있습니다.
+                                  </p>
+                              </div>
+
                               <div>
                                   <div className="flex justify-between items-center mb-2">
                                       <label className="text-sm font-bold text-gray-200 flex items-center gap-2">
@@ -554,27 +576,61 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
                                   </div>
                               </div>
 
-                              {/* Grok Settings */}
+                              {/* Magnum Settings */}
                               <div className="p-4 bg-gray-800/50 rounded-xl border border-gray-700 space-y-4">
                                   <h5 className="text-sm font-bold text-gray-200 flex items-center gap-2">
-                                      <Cpu size={14} className="text-red-400" /> Grok 모델 설정 (19금 전용)
+                                      <Cpu size={14} className="text-orange-400" /> Magnum (OpenRouter) 설정
                                   </h5>
                                   <p className="text-[10px] text-gray-400">
-                                      19금 원고 생성 및 시놉시스 확장 시 사용할 Grok 모델을 선택하세요.
+                                      OpenRouter를 통해 Magnum v4를 사용합니다. <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer" className="text-orange-400 hover:underline">여기에서 키를 발급받으세요.</a>
                                   </p>
                                   
                                   <div>
-                                      <label className="text-xs font-medium text-gray-400 mb-1 block">Grok 모델 선택</label>
-                                      <select 
-                                          className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm text-gray-200 outline-none focus:border-purple-500"
-                                          value={settings.grokModel || 'grok-3'}
-                                          onChange={(e) => handleGrokSettingChange('grokModel', e.target.value)}
-                                      >
-                                          <option value="grok-3">grok-3</option>
-                                          <option value="grok-4-0709">grok-4-0709</option>
-                                          <option value="grok-4-1-fast-non-reasoning">grok-4-1-fast-non-reasoning</option>
-                                          <option value="grok-4-1-fast-reasoning">grok-4-1-fast-reasoning</option>
-                                      </select>
+                                      <label className="text-xs font-medium text-gray-400 mb-1 block">Magnum API Key</label>
+                                      <div className="relative">
+                                          <input 
+                                              type="password"
+                                              className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm text-gray-200 outline-none focus:border-purple-500 pr-10"
+                                              placeholder={user ? "OpenRouter API 키 입력" : "로그인이 필요합니다"}
+                                              disabled={!user}
+                                              value={settings.magnumApiKey || ''}
+                                              onChange={(e) => handleGrokSettingChange('magnumApiKey', e.target.value)}
+                                          />
+                                          {settings.magnumApiKey && (
+                                              <div className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500">
+                                                  <CheckCircle2 size={16} />
+                                              </div>
+                                          )}
+                                      </div>
+                                  </div>
+                              </div>
+
+                              {/* Grok Settings */}
+                              <div className="p-4 bg-gray-800/50 rounded-xl border border-gray-700 space-y-4">
+                                  <h5 className="text-sm font-bold text-gray-200 flex items-center gap-2">
+                                      <Cpu size={14} className="text-red-400" /> Grok API 설정
+                                  </h5>
+                                  <p className="text-[10px] text-gray-400">
+                                      xAI Grok 3를 사용하려면 API 키가 필요합니다. <a href="https://console.x.ai/" target="_blank" rel="noreferrer" className="text-red-400 hover:underline">여기에서 키를 발급받으세요.</a>
+                                  </p>
+                                  
+                                  <div>
+                                      <label className="text-xs font-medium text-gray-400 mb-1 block">Grok API Key</label>
+                                      <div className="relative">
+                                          <input 
+                                              type="password"
+                                              className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm text-gray-200 outline-none focus:border-purple-500 pr-10"
+                                              placeholder={user ? "xAI API 키 입력" : "로그인이 필요합니다"}
+                                              disabled={!user}
+                                              value={settings.grokApiKey || ''}
+                                              onChange={(e) => handleGrokSettingChange('grokApiKey', e.target.value)}
+                                          />
+                                          {settings.grokApiKey && (
+                                              <div className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500">
+                                                  <CheckCircle2 size={16} />
+                                              </div>
+                                          )}
+                                      </div>
                                   </div>
                               </div>
 

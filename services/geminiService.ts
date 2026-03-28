@@ -5,14 +5,11 @@ import { NovelSettings, Project, MindMapNode, CharacterRelationship, CharacterPr
 import { 
     AI_PROMPTS, 
     getGeneralSynopsisPrompt, 
-    getMatureSynopsisPrompt, 
     getReferenceAnalysisPrompt,
     getRawStoryIdeaAnalysisPrompt,
     getManuscriptAnalysisPrompt,
     getProjectContextAnalysisPrompt,
     getWritingStyleAnalysisPrompt,
-    getMatureStyleAnalysisPrompt,
-    MATURE_SYSTEM_PROMPT,
     GENERAL_SYSTEM_PROMPT,
     getNovelContextPrompt,
     getStoryArchPrompt,
@@ -48,10 +45,10 @@ export { AI_PROMPTS };
 
 
 const SAFETY_SETTINGS = [
-    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE }
+    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
 ];
 
 
@@ -67,10 +64,20 @@ export const handleApiError = (e: any) => {
     }
 };
 
-export const GEMINI_MODELS = [
-    { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' },
-    { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro' },
+export const AI_MODELS = [
+    { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', provider: 'gemini' },
+    { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', provider: 'gemini' },
+    { id: 'grok-3', name: 'Grok 3', provider: 'grok' },
+    { id: 'anthracite-org/magnum-v4-72b', name: 'Magnum v4 72B', provider: 'magnum' }
 ];
+
+export const isGrokModel = (modelId: string) => {
+    return AI_MODELS.find(m => m.id === modelId)?.provider === 'grok';
+};
+
+export const isMagnumModel = (modelId: string) => {
+    return AI_MODELS.find(m => m.id === modelId)?.provider === 'magnum';
+};
 
 // --- NOTIFICATION HELPER ---
 const notifyModelUsage = (provider: string, model: string) => {
@@ -97,7 +104,10 @@ const callGrokAPI = async (
   temperature: number = 0.7
 ): Promise<string> => {
   try {
-    const effectiveApiKey = apiKey || DEFAULT_SETTINGS.grokApiKey || '';
+    const effectiveApiKey = (apiKey || DEFAULT_SETTINGS.grokApiKey || '').trim();
+    if (!effectiveApiKey) {
+        throw new Error("Grok API Key is missing. Please register it in settings.");
+    }
     const effectiveModel = model || 'grok-3';
 
     notifyModelUsage('xAI Grok', effectiveModel);
@@ -160,6 +170,87 @@ const callGrokAPI = async (
   }
 };
 
+// --- MAGNUM (OpenRouter) API INTEGRATION ---
+const callMagnumAPI = async (
+  messages: any[],
+  model: string,
+  apiKey: string,
+  onChunk?: (text: string) => void,
+  temperature: number = 0.7
+): Promise<string> => {
+  try {
+    // 사용자님이 제공하신 API 키 (중간에 ...이 포함된 경우 401 오류가 발생할 수 있으니 전체 키를 입력해주세요)
+    const PROVIDED_KEY = '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'; 
+    const effectiveApiKey = (apiKey || DEFAULT_SETTINGS.magnumApiKey || PROVIDED_KEY).trim();
+    
+    if (!effectiveApiKey || effectiveApiKey.includes('...')) {
+        throw new Error("Magnum API Key가 유효하지 않거나 중간에 생략되었습니다. 전체 키를 설정에서 입력해주세요.");
+    }
+    const effectiveModel = model || 'anthracite-org/magnum-v4-72b';
+
+    notifyModelUsage('OpenRouter Magnum', effectiveModel);
+
+    const response = await fetch("/api/magnum", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${effectiveApiKey}`,
+        "HTTP-Referer": typeof window !== 'undefined' ? window.location.origin : "https://novelcraft.app",
+        "X-Title": "NovelCraft"
+      },
+      body: JSON.stringify({
+        messages: messages,
+        model: effectiveModel,
+        stream: true, 
+        temperature: temperature,
+        max_tokens: 8192 
+      })
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Magnum API Error: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+
+    if (!response.body) throw new Error("Magnum API response body is empty");
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n');
+      
+      for (const line of lines) {
+        if (line.trim().startsWith('data: ')) {
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') break;
+          
+          try {
+            const parsed = JSON.parse(data);
+            const content = parsed.choices?.[0]?.delta?.content || "";
+            if (content) {
+              fullText += content;
+              if (onChunk) onChunk(content);
+            }
+          } catch (e) {
+            // Skip non-JSON lines
+          }
+        }
+      }
+    }
+
+    return fullText;
+  } catch (error) {
+    console.error("Magnum API Error", error);
+    throw error;
+  }
+};
+
 const cleanJson = (text: string): string => {
   if (!text) return "";
   let cleaned = text.trim();
@@ -183,21 +274,19 @@ const parseWorldviewContext = (worldviewRaw: string): string => {
   return worldviewRaw;
 };
 
-// --- Synopsis Refiner (Hybrid: Gemini/Grok based on isMature) ---
+// --- Synopsis Refiner ---
 export const refineSynopsisWithContext = async (
   rawSynopsis: string,
   project: Project | null,
   recentStories: SavedStory[],
   preAnalyzedContext?: string,
   styleGuide?: string,
-  isMatureOverride: boolean = false,
   grokOptions?: { apiKey: string, model: string },
   targetChapterCount: number = 1,
-  model: string = 'gemini-3-flash-preview'
+  model: string = 'gemini-3-flash-preview',
+  magnumOptions?: { apiKey: string, model: string }
 ): Promise<RefinedSynopsisCard[]> => {
   
-  const isMature = isMatureOverride || project?.settings?.isMature || (styleGuide && styleGuide.includes("19+"));
-
   let contextData = "";
   if (project) {
     contextData += `=== PROJECT WORLDVIEW ===\n${parseWorldviewContext(project.worldview)}\n\n=== CHARACTERS ===\n${project.characters}\n`;
@@ -213,53 +302,45 @@ export const refineSynopsisWithContext = async (
     ? `**Structure**: You MUST split the narrative into **EXACTLY ${targetChapterCount}** distinct chapters/sequences. Expand the user's input to fill these chapters if necessary.`
     : `**Structure**: Check for user-defined chapter markers (e.g., "Chapter 1", "1화"). If the user did NOT explicitly mark chapters, you MUST return **EXACTLY ONE** chapter containing the entire story. Do NOT split it into multiple chapters arbitrarily.`;
 
-  const prompt = isMature 
-    ? getMatureSynopsisPrompt(rawSynopsis, contextData, structureInstruction, styleGuide)
-    : getGeneralSynopsisPrompt(rawSynopsis, contextData, structureInstruction, styleGuide);
+  const prompt = getGeneralSynopsisPrompt(rawSynopsis, contextData, structureInstruction, styleGuide);
 
   try {
-    const ai = getAiClient();
-    notifyModelUsage(isMature ? 'xAI Grok' : 'Gemini', isMature ? (grokOptions?.model || 'grok-3') : model);
-    if (isMature) {
-        const grokResponse = await callGrokAPI(
-            [{role: 'user', content: prompt}],
-            grokOptions?.model || DEFAULT_SETTINGS.grokModel || 'grok-3',
-            grokOptions?.apiKey || DEFAULT_SETTINGS.grokApiKey || ''
-        );
-        return JSON.parse(cleanJson(grokResponse)) as RefinedSynopsisCard[];
-    } else {
-        const response = await ai.models.generateContent({
-          model: model,
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          config: {
-            responseMimeType: 'application/json',
-            safetySettings: SAFETY_SETTINGS
-          }
-        });
-        if (response.text) return JSON.parse(cleanJson(response.text)) as RefinedSynopsisCard[];
-        return [];
-    }
+    const result = await callAI(
+        [{ role: 'user', content: prompt }],
+        model,
+        {
+            grokApiKey: grokOptions?.apiKey,
+            magnumApiKey: magnumOptions?.apiKey,
+            responseMimeType: 'application/json'
+        }
+    );
+    return JSON.parse(cleanJson(result)) as RefinedSynopsisCard[];
   } catch (e) { handleApiError(e); 
     console.error("Synopsis refinement failed", e);
     return [];
   }
 };
 
-export const analyzeSynopsisReference = async (text: string, isMature: boolean): Promise<string> => {
-  const prompt = getReferenceAnalysisPrompt(text, isMature);
-
-  try {
-      const ai = getAiClient();
-      notifyModelUsage('Gemini', 'gemini-3-flash-preview');
-      const response = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
-          contents: [{ role: 'user', parts: [{ text: prompt }] }]
-      ,
-            config: { safetySettings: SAFETY_SETTINGS }});
-      return response.text || "";
-  } catch (e) { handleApiError(e); 
-      return "";
-  }
+export const analyzeSynopsisReference = async (
+    text: string, 
+    model: string = 'gemini-3-flash-preview', 
+    grokOptions?: { apiKey: string },
+    magnumOptions?: { apiKey: string }
+): Promise<string> => {
+    const prompt = getReferenceAnalysisPrompt(text);
+    try {
+        return await callAI(
+            [{ role: 'user', content: prompt }],
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey,
+                magnumApiKey: magnumOptions?.apiKey
+            }
+        );
+    } catch (e) {
+        handleApiError(e);
+        return "";
+    }
 };
 
 export const generateNovelStep = async (
@@ -271,11 +352,11 @@ export const generateNovelStep = async (
     structuralGuide?: string, 
     contextAnalysis?: string,
     onChunk?: (text: string) => void, 
-    storyAnalysis?: string
+    storyAnalysis?: string,
+    model: string = 'gemini-3-flash-preview',
+    grokOptions?: { apiKey: string },
+    magnumOptions?: { apiKey: string }
 ): Promise<string> => {
-    // Only set isMature for Grok if toggle is ON or style is strictly 'mature'. 
-    // Mixed style should use Gemini unless user forces 19+ mode.
-    const isMature = settings.isMature || (settings.activeStyle === 'mature');
     
     const promptContext = getNovelContextPrompt(
         project, 
@@ -286,77 +367,109 @@ export const generateNovelStep = async (
         previousContent
     );
 
-    const systemPrompt = isMature ? MATURE_SYSTEM_PROMPT : GENERAL_SYSTEM_PROMPT;
+    const systemPrompt = GENERAL_SYSTEM_PROMPT;
     
-    // Choose Provider
-    const geminiModel = settings.geminiModel || 'gemini-3-flash-preview';
-    notifyModelUsage(isMature ? 'xAI Grok' : 'Gemini', isMature ? (settings.grokModel || 'grok-3') : geminiModel);
-    
-    if (isMature) {
-        // Use Grok for Mature
-        return await callGrokAPI(
+    try {
+        return await callAI(
             [
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: promptContext }
             ],
-            settings.grokModel || 'grok-3',
-            settings.grokApiKey || DEFAULT_SETTINGS.grokApiKey || '',
-            onChunk
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey || settings.grokApiKey,
+                magnumApiKey: magnumOptions?.apiKey || settings.magnumApiKey,
+                onChunk,
+                temperature: 0.7
+            }
         );
-    } else {
-        // Use Gemini for General
-    try {
-        const ai = getAiClient();
-        const response = await ai.models.generateContentStream({
-            model: geminiModel,
-            contents: [
-                { role: 'user', parts: [{ text: systemPrompt + "\n\n" + promptContext }] }
-            ],
-            config: { safetySettings: SAFETY_SETTINGS,
-                maxOutputTokens: 8192,
-            }
-        });
+    } catch (e: any) {
+        handleApiError(e);
+        console.error(`AI generation failed with model ${model}:`, e);
         
-        let fullText = "";
-        for await (const chunk of response) {
-            const text = chunk.text; // Access property, do not call as method
-            if (text) {
-                fullText += text;
-                if (onChunk) onChunk(text);
-            }
-        }
-        return fullText;
-    } catch (e: any) { handleApiError(e); 
-        console.error(`Gemini generation failed with model ${geminiModel}:`, e);
-        
-        // Fallback logic for 403/404 or other errors
-        if (e.message?.includes('403') || e.message?.includes('404') || e.message?.includes('not found')) {
-            console.warn(`Falling back to gemini-3-flash-preview due to error with ${geminiModel}`);
-            notifyModelUsage('Gemini', 'gemini-3-flash-preview (Fallback)');
-            
-            const ai = getAiClient();
-            const fallbackResponse = await ai.models.generateContentStream({
-                model: 'gemini-3-flash-preview',
-                contents: [
-                    { role: 'user', parts: [{ text: systemPrompt + "\n\n" + promptContext }] }
+        // Fallback logic for Gemini only
+        if (!isGrokModel(model) && !isMagnumModel(model) && (e.message?.includes('403') || e.message?.includes('404') || e.message?.includes('not found'))) {
+            console.warn(`Falling back to gemini-3-flash-preview due to error with ${model}`);
+            return await callAI(
+                [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: promptContext }
                 ],
-                config: { safetySettings: SAFETY_SETTINGS,
-                    maxOutputTokens: 8192,
-                }
-            });
-            
-            let fullText = "";
-            for await (const chunk of fallbackResponse) {
-                const text = chunk.text;
-                if (text) {
-                    fullText += text;
-                    if (onChunk) onChunk(text);
-                }
-            }
-            return fullText;
+                'gemini-3-flash-preview',
+                { onChunk, temperature: 0.7 }
+            );
         }
         throw e;
     }
+};
+
+export const callAI = async (
+    messages: { role: string, content: string }[],
+    model: string,
+    options: {
+        grokApiKey?: string,
+        magnumApiKey?: string,
+        onChunk?: (text: string) => void,
+        temperature?: number,
+        responseMimeType?: string
+    }
+): Promise<string> => {
+    const isGrok = isGrokModel(model);
+    const isMagnum = isMagnumModel(model);
+
+    if (isGrok) {
+        try {
+            return await callGrokAPI(messages, model, options.grokApiKey || '', options.onChunk, options.temperature);
+        } catch (e) {
+            console.error("Grok API failed, falling back to Gemini", e);
+            return await callAI(messages, 'gemini-3-flash-preview', options);
+        }
+    } else if (isMagnum) {
+        try {
+            return await callMagnumAPI(messages, model, options.magnumApiKey || '', options.onChunk, options.temperature);
+        } catch (e) {
+            console.error("Magnum API failed, falling back to Gemini", e);
+            // If it's a 401 error, we definitely want to fallback
+            return await callAI(messages, 'gemini-3-flash-preview', options);
+        }
+    } else {
+        const ai = getAiClient();
+        const systemMsg = messages.find(m => m.role === 'system')?.content;
+        const userMsgs = messages.filter(m => m.role !== 'system');
+        const prompt = userMsgs.map(m => m.content).join("\n\n");
+        
+        const config: any = { 
+            temperature: options.temperature,
+            responseMimeType: options.responseMimeType as any,
+            maxOutputTokens: 8192
+        };
+        if (systemMsg) {
+            config.systemInstruction = systemMsg;
+        }
+
+        if (options.onChunk) {
+            const response = await ai.models.generateContentStream({
+                model: model,
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                config
+            });
+            let fullText = "";
+            for await (const chunk of response) {
+                const text = chunk.text;
+                if (text) {
+                    fullText += text;
+                    options.onChunk(text);
+                }
+            }
+            return fullText;
+        } else {
+            const response = await ai.models.generateContent({
+                model: model,
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                config
+            });
+            return response.text || "";
+        }
     }
 };
 
@@ -364,58 +477,49 @@ export const analyzeRawStoryIdea = async (
     idea: string, 
     chapterCount: number, 
     pov: string, 
-    isMature: boolean,
-    grokOptions?: { apiKey: string, model: string }
+    model: string = 'gemini-3-flash-preview',
+    grokOptions?: { apiKey: string },
+    magnumOptions?: { apiKey: string }
 ): Promise<string> => {
-    const prompt = getRawStoryIdeaAnalysisPrompt(idea, chapterCount, pov, isMature);
+    const prompt = getRawStoryIdeaAnalysisPrompt(idea, chapterCount, pov);
 
-    notifyModelUsage(isMature ? 'xAI Grok' : 'Gemini', isMature ? (grokOptions?.model || 'grok-3') : 'gemini-3-flash-preview');
-    if (isMature) {
-        return await callGrokAPI(
+    try {
+        return await callAI(
             [{ role: 'user', content: prompt }],
-            grokOptions?.model || 'grok-3',
-            grokOptions?.apiKey || DEFAULT_SETTINGS.grokApiKey || ''
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey,
+                magnumApiKey: magnumOptions?.apiKey
+            }
         );
-    } else {
-        const ai = getAiClient();
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: [{ role: 'user', parts: [{ text: prompt }] }]
-        ,
-            config: { safetySettings: SAFETY_SETTINGS }});
-        return response.text || "";
+    } catch (e) {
+        handleApiError(e);
+        throw e;
     }
 };
 
 export const generateStoryArch = async (
     idea: string, 
     chapterCount: number, 
-    isMature: boolean, 
     analysisContext?: string, 
     preserveSynopsis: boolean = false,
-    grokOptions?: { apiKey: string, model: string }
+    model: string = 'gemini-3-flash-preview',
+    grokOptions?: { apiKey: string },
+    magnumOptions?: { apiKey: string }
 ): Promise<StoryDetails | null> => {
     const prompt = getStoryArchPrompt(idea, analysisContext, preserveSynopsis, chapterCount);
 
     try {
-        const ai = getAiClient();
-        notifyModelUsage(isMature ? 'xAI Grok' : 'Gemini', isMature ? (grokOptions?.model || 'grok-3') : 'gemini-3-flash-preview');
-        if (isMature) {
-             const resp = await callGrokAPI(
-                [{ role: 'user', content: prompt }],
-                grokOptions?.model || 'grok-3',
-                grokOptions?.apiKey || DEFAULT_SETTINGS.grokApiKey || ''
-            );
-            return JSON.parse(cleanJson(resp));
-        } else {
-            const response = await ai.models.generateContent({
-                model: 'gemini-3-flash-preview', // Updated to 3 Flash
-                contents: [{ role: 'user', parts: [{ text: prompt }] }],
-                config: { safetySettings: SAFETY_SETTINGS, responseMimeType: 'application/json' }
-            });
-            if (response.text) return JSON.parse(cleanJson(response.text));
-        }
-        return null;
+        const resp = await callAI(
+            [{ role: 'user', content: prompt }],
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey,
+                magnumApiKey: magnumOptions?.apiKey,
+                responseMimeType: 'application/json'
+            }
+        );
+        return JSON.parse(cleanJson(resp));
     } catch (e) { handleApiError(e); 
         console.error("Story Arch Gen Failed", e);
         return null;
@@ -425,95 +529,94 @@ export const generateStoryArch = async (
 export const generateEpisodeOutline = async (
     idea: string, 
     chapterCount: number, 
-    isMature: boolean, 
     hashtags: string[], 
     storyDetails: StoryDetails, 
     preserveSynopsis: boolean = false,
-    grokOptions?: { apiKey: string, model: string }
+    model: string = 'gemini-3-flash-preview',
+    grokOptions?: { apiKey: string },
+    magnumOptions?: { apiKey: string }
 ): Promise<ChapterOutline[]> => {
     const prompt = getEpisodeOutlinePrompt(chapterCount, storyDetails);
 
     try {
-        const ai = getAiClient();
-        notifyModelUsage(isMature ? 'xAI Grok' : 'Gemini', isMature ? (grokOptions?.model || 'grok-3') : 'gemini-3-flash-preview');
-        if (isMature) {
-             const resp = await callGrokAPI(
-                [{ role: 'user', content: prompt }],
-                grokOptions?.model || 'grok-3',
-                grokOptions?.apiKey || DEFAULT_SETTINGS.grokApiKey || ''
-            );
-            return JSON.parse(cleanJson(resp));
-        } else {
-            const response = await ai.models.generateContent({
-                model: 'gemini-3-flash-preview', // Updated to 3 Flash
-                contents: [{ role: 'user', parts: [{ text: prompt }] }],
-                config: { safetySettings: SAFETY_SETTINGS, responseMimeType: 'application/json' }
-            });
-            if (response.text) return JSON.parse(cleanJson(response.text));
-        }
-        return [];
+        const resp = await callAI(
+            [{ role: 'user', content: prompt }],
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey,
+                magnumApiKey: magnumOptions?.apiKey,
+                responseMimeType: 'application/json'
+            }
+        );
+        return JSON.parse(cleanJson(resp));
     } catch (e) { handleApiError(e);  return []; }
 };
 
 export const continueStoryStream = async (
     currentContent: string, 
     onChunk: (text: string) => void,
-    temperature: number = 0.7
+    temperature: number = 0.7,
+    model: string = 'gemini-3-flash-preview',
+    grokOptions?: { apiKey: string },
+    magnumOptions?: { apiKey: string }
 ): Promise<string> => {
     const prompt = getContinueStoryPrompt(currentContent);
-    const model = 'gemini-3-flash-preview';
     
-    const ai = getAiClient();
-    notifyModelUsage('Gemini', model);
-    const response = await ai.models.generateContentStream({
-        model: model,
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        config: { safetySettings: SAFETY_SETTINGS, temperature }
-    });
-
-    let fullText = "";
-    for await (const chunk of response) {
-        const text = chunk.text;
-        if (text) {
-            fullText += text;
-            onChunk(text);
-        }
+    try {
+        return await callAI(
+            [{ role: 'user', content: prompt }],
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey,
+                magnumApiKey: magnumOptions?.apiKey,
+                onChunk,
+                temperature
+            }
+        );
+    } catch (e) {
+        handleApiError(e);
+        throw e;
     }
-    return fullText;
 };
 
 export const refineText = async (
     text: string, 
     instruction: string, 
-    isMature: boolean = false
+    model: string = 'gemini-3-flash-preview',
+    grokOptions?: { apiKey: string },
+    magnumOptions?: { apiKey: string }
 ): Promise<string> => {
     const prompt = getRefineTextPrompt(text, instruction);
     
-    const model = 'gemini-3-flash-preview'; // Updated to gemini-3-flash-preview
-    const ai = getAiClient();
-    notifyModelUsage('Gemini', model);
-    const response = await ai.models.generateContent({
-        model: model,
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        config: {
-            safetySettings: SAFETY_SETTINGS
-        }
-    });
-    return response.text || text;
+    try {
+        return await callAI(
+            [{ role: 'user', content: prompt }],
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey,
+                magnumApiKey: magnumOptions?.apiKey
+            }
+        );
+    } catch (e) {
+        handleApiError(e);
+        return text;
+    }
 };
 
-export const analyzeManuscript = async (text: string): Promise<{title: string, worldview: {title: string, content: string}[], characters: CharacterProfile[]} | null> => {
+export const analyzeManuscript = async (text: string, model: string = 'gemini-3-flash-preview', grokOptions?: { apiKey: string }, magnumOptions?: { apiKey: string }): Promise<{title: string, worldview: {title: string, content: string}[], characters: CharacterProfile[]} | null> => {
     const prompt = getManuscriptAnalysisPrompt(text);
     
     try {
-        const ai = getAiClient();
-        notifyModelUsage('Gemini', 'gemini-3-flash-preview');
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            config: { safetySettings: SAFETY_SETTINGS, responseMimeType: 'application/json' }
-        });
-        if (response.text) return JSON.parse(cleanJson(response.text));
+        const responseText = await callAI(
+            [{ role: 'user', content: prompt }],
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey,
+                magnumApiKey: magnumOptions?.apiKey,
+                responseMimeType: 'application/json'
+            }
+        );
+        if (responseText) return JSON.parse(cleanJson(responseText));
         return null;
     } catch(e) { handleApiError(e);  return null; }
 };
@@ -551,57 +654,71 @@ const sortStoriesByChapter = (stories: SavedStory[]) => {
     });
 };
 
-export const analyzeProjectContext = async (stories: SavedStory[], model: string = 'gemini-3-flash-preview'): Promise<{analysis: string, references: string[]} | null> => {
-    if (stories.length === 0) return null;
-    
-    // 1. Smart Sort by Chapter Logic
+export const analyzeProjectContext = async (
+    stories: SavedStory[],
+    model: string = 'gemini-3-flash-preview',
+    grokOptions?: { apiKey: string },
+    magnumOptions?: { apiKey: string }
+): Promise<{ analysis: string; references: string[] } | null> => {
+    if (!stories || stories.length === 0) {
+        return null;
+    }
+
+    // 1. Sort stories chronologically by chapter
     const sortedStories = sortStoriesByChapter(stories);
-    
-    // 2. Take the last 3 stories (Latest 3 in chronological order)
-    const recentThree = sortedStories.slice(-3);
-    
-    // 3. Format for prompt
-    const contentSample = recentThree.map((s) => `
-[Title: ${s.title}]
-Content Segment (End):
-"...${s.content.slice(-2000)}" 
-`).join('\n\n');
-    
-    const prompt = getProjectContextAnalysisPrompt(contentSample);
-    
+
+    // 2. Select the 3 most recent stories to provide context
+    const recentStories = sortedStories.slice(-3);
+
+    // 3. Extract the last 2000 characters of each story to build the context sample
+    const contextSample = recentStories
+        .map((story) => `[Title: ${story.title}]\nContent Segment (End):\n"...${story.content.slice(-2000)}"`)
+        .join('\n\n');
+
+    const prompt = getProjectContextAnalysisPrompt(contextSample);
+
     try {
-        const ai = getAiClient();
-        notifyModelUsage('Gemini', model);
-        const response = await ai.models.generateContent({
-            model: model,
-            contents: [{ role: 'user', parts: [{ text: prompt }] }]
-        ,
-            config: { safetySettings: SAFETY_SETTINGS }});
+        const analysisText = await callAI(
+            [{ role: 'user', content: prompt }],
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey,
+                magnumApiKey: magnumOptions?.apiKey
+            }
+        );
         return {
-            analysis: response.text || "",
-            references: recentThree.map(s => s.title) // Return titles of used stories
+            analysis: analysisText,
+            references: recentStories.map((story) => story.title)
         };
-    } catch(e: any) { handleApiError(e);  
-        console.error(`Context analysis failed with model ${model}:`, e);
-        if (model !== 'gemini-3-flash-preview' && (e.message?.includes('403') || e.message?.includes('404') || e.message?.includes('not found'))) {
-             try {
-                console.warn(`Falling back to gemini-3-flash-preview for context analysis`);
-                notifyModelUsage('Gemini', 'gemini-3-flash-preview (Fallback)');
-                const ai = getAiClient();
-                const fallbackResponse = await ai.models.generateContent({
-                    model: 'gemini-3-flash-preview',
-                    contents: [{ role: 'user', parts: [{ text: prompt }] }]
-                ,
-            config: { safetySettings: SAFETY_SETTINGS }});
+    } catch (error: any) {
+        console.error(`Context analysis failed with model ${model}:`, error);
+        
+        // Check if the error is related to permissions or model availability
+        const errorMessage = error.message?.toLowerCase() || "";
+        const isFallbackEligible = 
+            model !== 'gemini-3-flash-preview' && 
+            ['403', '404', 'not found', 'forbidden'].some((errStr) => errorMessage.includes(errStr));
+
+        if (isFallbackEligible) {
+            console.warn('Attempting fallback to gemini-3-flash-preview for context analysis...');
+            try {
+                const fallbackText = await callAI(
+                    [{ role: 'user', content: prompt }],
+                    'gemini-3-flash-preview',
+                    {}
+                );
                 return {
-                    analysis: fallbackResponse.text || "",
-                    references: recentThree.map(s => s.title)
+                    analysis: fallbackText,
+                    references: recentStories.map((story) => story.title)
                 };
-             } catch (fallbackError) { handleApiError(fallbackError); 
-                 return null;
-             }
+            } catch (fallbackError) {
+                handleApiError(fallbackError);
+                return null;
+            }
         }
-        return null; 
+
+        handleApiError(error);
+        return null;
     }
 };
 
@@ -609,7 +726,10 @@ export const chatWithWorldBuilderAIAssistant = async (
     project: any,
     worldItems: any[],
     userMsg: string,
-    history: any[]
+    history: any[],
+    model: string = 'gemini-3.1-pro-preview',
+    grokOptions?: { apiKey: string },
+    magnumOptions?: { apiKey: string }
 ): Promise<{ reply: string, suggestedItem?: { title: string, content: string, type: 'folder' | 'note' } }> => {
     const prompt = `
     You are an AI World Building Assistant for a story project.
@@ -644,192 +764,280 @@ export const chatWithWorldBuilderAIAssistant = async (
     `;
     
     try {
-        const ai = getAiClient();
-        notifyModelUsage('Gemini', 'gemini-3.1-pro-preview');
-        const response = await ai.models.generateContent({
-            model: 'gemini-3.1-pro-preview',
-            contents: [
-                ...history.map(h => ({ role: h.role === 'user' ? 'user' : 'model', parts: [{ text: h.content }] })),
-                { role: 'user', parts: [{ text: prompt }] }
+        const responseText = await callAI(
+            [
+                ...history.map(h => ({ role: h.role === 'user' ? 'user' : 'model', content: h.content })),
+                { role: 'user', content: prompt }
             ],
-            config: { safetySettings: SAFETY_SETTINGS, responseMimeType: 'application/json' }
-        });
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey,
+                magnumApiKey: magnumOptions?.apiKey,
+                responseMimeType: 'application/json'
+            }
+        );
         
-        if (response.text) {
-            const parsed = JSON.parse(cleanJson(response.text));
+        if (responseText) {
+            const parsed = JSON.parse(cleanJson(responseText));
             return {
                 reply: parsed.reply || "응답을 생성하지 못했습니다.",
                 suggestedItem: parsed.suggestedItem
             };
         }
         return { reply: "응답을 생성하지 못했습니다." };
-    } catch (e) { handleApiError(e); 
+    } catch (e) { 
+        handleApiError(e); 
         console.error("AI Assistant Error:", e);
         return { reply: "오류가 발생했습니다. 다시 시도해주세요." };
     }
 };
 
-export const generateCharacterProfile = async (worldview: string, name: string, role: string, extra?: string): Promise<CharacterProfile | null> => {
+export const generateCharacterProfile = async (
+    worldview: string, 
+    name: string, 
+    role: string, 
+    extra?: string,
+    model: string = 'gemini-3-flash-preview',
+    grokOptions?: { apiKey: string },
+    magnumOptions?: { apiKey: string }
+): Promise<CharacterProfile | null> => {
     const prompt = getCharacterProfilePrompt(worldview, name, role, extra);
     
     try {
-        const ai = getAiClient();
-        notifyModelUsage('Gemini', 'gemini-3-flash-preview');
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            config: { safetySettings: SAFETY_SETTINGS, responseMimeType: 'application/json' }
-        });
-        if (response.text) return JSON.parse(cleanJson(response.text));
+        const responseText = await callAI(
+            [{ role: 'user', content: prompt }],
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey,
+                magnumApiKey: magnumOptions?.apiKey,
+                responseMimeType: 'application/json'
+            }
+        );
+        if (responseText) return JSON.parse(cleanJson(responseText));
         return null;
     } catch(e) { handleApiError(e);  return null; }
 };
 
-export const generateRelationshipMap = async (charactersJson: string): Promise<CharacterRelationship[]> => {
+export const generateRelationshipMap = async (
+    charactersJson: string,
+    model: string = 'gemini-3-flash-preview',
+    grokOptions?: { apiKey: string },
+    magnumOptions?: { apiKey: string }
+): Promise<CharacterRelationship[]> => {
     const prompt = getRelationshipMapPrompt(charactersJson);
     try {
-        const ai = getAiClient();
-        notifyModelUsage('Gemini', 'gemini-3-flash-preview');
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            config: { safetySettings: SAFETY_SETTINGS, responseMimeType: 'application/json' }
-        });
-        if (response.text) return JSON.parse(cleanJson(response.text));
+        const responseText = await callAI(
+            [{ role: 'user', content: prompt }],
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey,
+                magnumApiKey: magnumOptions?.apiKey,
+                responseMimeType: 'application/json'
+            }
+        );
+        if (responseText) return JSON.parse(cleanJson(responseText));
         return [];
     } catch(e) { handleApiError(e);  return []; }
 };
 
-export const chatWithStoryArchitect = async (details: StoryDetails | null, userMsg: string, history: any[]): Promise<{reply: string, updatedDetails?: StoryDetails}> => {
+export const chatWithStoryArchitect = async (
+    details: StoryDetails | null, 
+    userMsg: string, 
+    history: any[],
+    model: string = 'gemini-3.1-pro-preview',
+    grokOptions?: { apiKey: string },
+    magnumOptions?: { apiKey: string }
+): Promise<{reply: string, updatedDetails?: StoryDetails}> => {
     const prompt = getStoryArchitectChatPrompt(details, userMsg);
     
-    const ai = getAiClient();
-    notifyModelUsage('Gemini', 'gemini-3.1-pro-preview');
-    const response = await ai.models.generateContent({
-        model: 'gemini-3.1-pro-preview',
-        contents: [{ role: 'user', parts: [{ text: prompt }] }]
-    ,
-            config: { safetySettings: SAFETY_SETTINGS }});
-    
-    const text = response.text || "";
-    let updatedDetails = undefined;
-    
-    if (text.includes('```json')) {
-        const jsonStr = cleanJson(text.split('```json')[1].split('```')[0]);
-        try { updatedDetails = JSON.parse(jsonStr); } catch(e) { handleApiError(e); }
+    try {
+        const responseText = await callAI(
+            [
+                ...history.map(h => ({ role: h.role === 'user' ? 'user' : 'model', content: h.content })),
+                { role: 'user', content: prompt }
+            ],
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey,
+                magnumApiKey: magnumOptions?.apiKey,
+                responseMimeType: 'application/json'
+            }
+        );
+        
+        if (responseText) {
+            const parsed = JSON.parse(cleanJson(responseText));
+            return {
+                reply: parsed.reply || "응답을 생성하지 못했습니다.",
+                updatedDetails: parsed.updatedDetails
+            };
+        }
+        return { reply: "응답을 생성하지 못했습니다." };
+    } catch (e) {
+        handleApiError(e);
+        return { reply: "오류가 발생했습니다." };
     }
-    
-    return { reply: text, updatedDetails };
 };
 
-export const chatWithIdeaPartner = async (project: Project | null, messages: ChatMessage[], contextAnalysis?: string, styleDescription?: string): Promise<string> => {
-    const history = messages.map(m => ({ role: m.role, parts: [{ text: m.text }] }));
+export const chatWithIdeaPartner = async (
+    project: Project | null, 
+    messages: ChatMessage[], 
+    contextAnalysis?: string, 
+    styleDescription?: string,
+    model: string = 'gemini-3-flash-preview',
+    grokOptions?: { apiKey: string },
+    magnumOptions?: { apiKey: string }
+): Promise<string> => {
+    const history = messages.map(m => ({ role: m.role, content: m.text }));
     const lastMsg = history.pop();
     
     if (!lastMsg) return "";
 
     const systemPrompt = getIdeaPartnerSystemPrompt(project, contextAnalysis, styleDescription);
     
-    const ai = getAiClient();
-    notifyModelUsage('Gemini', 'gemini-3-flash-preview');
-    const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: [
-            { role: 'user', parts: [{ text: systemPrompt }] }, // Inject system prompt as first user message for context
-            ...history, 
-            lastMsg
-        ]
-    ,
-            config: { safetySettings: SAFETY_SETTINGS }});
-    
-    return response.text || "";
+    try {
+        return await callAI(
+            [
+                { role: 'system', content: systemPrompt },
+                ...history,
+                lastMsg
+            ],
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey,
+                magnumApiKey: magnumOptions?.apiKey
+            }
+        );
+    } catch (e) {
+        handleApiError(e);
+        return "죄송합니다. 답변을 생성하는 중에 오류가 발생했습니다.";
+    }
 };
 
-export const generateSynopsisOptions = async (project: Project | null, input: string, contextAnalysis?: string): Promise<any[]> => {
+export const generateSynopsisOptions = async (
+    project: Project | null, 
+    input: string, 
+    contextAnalysis?: string,
+    model: string = 'gemini-3-flash-preview',
+    grokOptions?: { apiKey: string },
+    magnumOptions?: { apiKey: string }
+): Promise<any[]> => {
     const prompt = getSynopsisOptionsPrompt(input, contextAnalysis);
     try {
-        const ai = getAiClient();
-        notifyModelUsage('Gemini', 'gemini-3-flash-preview');
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            config: { safetySettings: SAFETY_SETTINGS, responseMimeType: 'application/json' }
-        });
-        if (response.text) return JSON.parse(cleanJson(response.text));
+        const responseText = await callAI(
+            [{ role: 'user', content: prompt }],
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey,
+                magnumApiKey: magnumOptions?.apiKey,
+                responseMimeType: 'application/json'
+            }
+        );
+        if (responseText) return JSON.parse(cleanJson(responseText));
         return [];
     } catch(e) { handleApiError(e);  return []; }
 };
 
-export const expandDetailedSynopsis = async (summary: string, project: Project | null): Promise<string> => {
+export const expandDetailedSynopsis = async (
+    summary: string, 
+    project: Project | null,
+    model: string = 'gemini-3.1-pro-preview',
+    grokOptions?: { apiKey: string },
+    magnumOptions?: { apiKey: string }
+): Promise<string> => {
     const prompt = getExpandDetailedSynopsisPrompt(summary);
-    const ai = getAiClient();
-    notifyModelUsage('Gemini', 'gemini-3.1-pro-preview');
-    const response = await ai.models.generateContent({
-        model: 'gemini-3.1-pro-preview',
-        contents: [{ role: 'user', parts: [{ text: prompt }] }]
-    ,
-            config: { safetySettings: SAFETY_SETTINGS }});
-    return response.text || "";
+    try {
+        return await callAI(
+            [{ role: 'user', content: prompt }],
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey,
+                magnumApiKey: magnumOptions?.apiKey
+            }
+        );
+    } catch (e) {
+        handleApiError(e);
+        throw e;
+    }
 };
 
-export const organizeWorldviewFromChat = async (chatText: string): Promise<WorldItem[]> => {
+export const organizeWorldviewFromChat = async (
+    chatText: string,
+    model: string = 'gemini-3-flash-preview',
+    grokOptions?: { apiKey: string },
+    magnumOptions?: { apiKey: string }
+): Promise<WorldItem[]> => {
     const prompt = getOrganizeWorldviewPrompt(chatText);
     try {
-        const ai = getAiClient();
-        notifyModelUsage('Gemini', 'gemini-3-flash-preview');
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            config: { safetySettings: SAFETY_SETTINGS, responseMimeType: 'application/json' }
-        });
-        if (response.text) {
-            const items = JSON.parse(cleanJson(response.text));
+        const responseText = await callAI(
+            [{ role: 'user', content: prompt }],
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey,
+                magnumApiKey: magnumOptions?.apiKey,
+                responseMimeType: 'application/json'
+            }
+        );
+        if (responseText) {
+            const items = JSON.parse(cleanJson(responseText));
             return items.map((i: any) => ({ ...i, id: Date.now().toString() + Math.random(), type: 'note', createdAt: Date.now() }));
         }
         return [];
     } catch(e) { handleApiError(e);  return []; }
 };
 
-export const extractCharacterFromChat = async (chatText: string): Promise<CharacterProfile | null> => {
+export const extractCharacterFromChat = async (
+    chatText: string,
+    model: string = 'gemini-3-flash-preview',
+    grokOptions?: { apiKey: string },
+    magnumOptions?: { apiKey: string }
+): Promise<CharacterProfile | null> => {
     const prompt = getExtractCharacterPrompt(chatText);
     try {
-        const ai = getAiClient();
-        notifyModelUsage('Gemini', 'gemini-3-flash-preview');
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            config: { safetySettings: SAFETY_SETTINGS, responseMimeType: 'application/json' }
-        });
-        if (response.text) return JSON.parse(cleanJson(response.text));
+        const responseText = await callAI(
+            [{ role: 'user', content: prompt }],
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey,
+                magnumApiKey: magnumOptions?.apiKey,
+                responseMimeType: 'application/json'
+            }
+        );
+        if (responseText) return JSON.parse(cleanJson(responseText));
         return null;
     } catch(e) { handleApiError(e);  return null; }
 };
 
-export const analyzeWritingStyle = async (text: string): Promise<string> => {
+export const analyzeWritingStyle = async (
+    text: string,
+    model: string = 'gemini-3-flash-preview',
+    grokOptions?: { apiKey: string },
+    magnumOptions?: { apiKey: string }
+): Promise<string> => {
     const prompt = getWritingStyleAnalysisPrompt(text);
-    const ai = getAiClient();
-    notifyModelUsage('Gemini', 'gemini-3-flash-preview');
-    const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: [{ role: 'user', parts: [{ text: prompt }] }]
-    ,
-            config: { safetySettings: SAFETY_SETTINGS }});
-    return response.text || "";
-};
-
-export const analyzeMatureStyle = async (text: string, grokOptions?: { apiKey: string, model: string }): Promise<string> => {
-    const prompt = getMatureStyleAnalysisPrompt(text);
-    if (grokOptions) {
-        return await callGrokAPI([{ role: 'user', content: prompt }], grokOptions.model, grokOptions.apiKey);
+    try {
+        return await callAI(
+            [{ role: 'user', content: prompt }],
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey,
+                magnumApiKey: magnumOptions?.apiKey
+            }
+        );
+    } catch (e) {
+        handleApiError(e);
+        throw e;
     }
-    return analyzeWritingStyle(text);
 };
 
-export const analyzeMixedStyle = async (text: string, grokOptions?: { apiKey: string, model: string }): Promise<string> => {
-    return analyzeMatureStyle(text, grokOptions);
-};
-
-export const generateProjectAssistantResponse = async (query: string, projects: Project[], selectedProjectId: string | null, history: any[]): Promise<string> => {
+export const generateProjectAssistantResponse = async (
+    query: string, 
+    projects: Project[], 
+    selectedProjectId: string | null, 
+    history: any[],
+    model: string = 'gemini-3-flash-preview',
+    grokOptions?: { apiKey: string },
+    magnumOptions?: { apiKey: string }
+): Promise<string> => {
     const contextProject = selectedProjectId ? projects.find(p => p.id === selectedProjectId) : null;
     const context = contextProject 
         ? `Project: ${contextProject.name}\nWorld: ${contextProject.worldview}\nChars: ${contextProject.characters}` 
@@ -837,14 +1045,24 @@ export const generateProjectAssistantResponse = async (query: string, projects: 
         
     const prompt = getProjectAssistantPrompt(context, query);
     
-    const ai = getAiClient();
-    notifyModelUsage('Gemini', 'gemini-3-flash-preview');
-    const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: [{ role: 'user', parts: [{ text: prompt }] }]
-    ,
-            config: { safetySettings: SAFETY_SETTINGS }});
-    return response.text || "";
+    try {
+        return await callAI(
+            [
+                { role: 'system', content: "You are a helpful writing assistant for NovelCraft." },
+                ...history.map(m => ({ role: m.role === 'model' ? 'assistant' : m.role, content: m.text })),
+                { role: 'user', content: prompt }
+            ],
+            model,
+            {
+                grokApiKey: grokOptions?.apiKey,
+                magnumApiKey: magnumOptions?.apiKey
+            }
+        );
+    } catch (e) {
+        handleApiError(e);
+        console.error("Assistant response failed", e);
+        return "죄송합니다. 답변을 생성하는 중에 오류가 발생했습니다.";
+    }
 };
 
 export const parseRawOutline = (text: string): ChapterOutline[] => {

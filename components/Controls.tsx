@@ -1,8 +1,8 @@
 
 import React, { useRef, useState, useMemo, useEffect } from 'react';
-import { Upload, AlertTriangle, Settings2, Book, Hash, X, Plus, Paperclip, CheckCircle2, FileText, BrainCircuit, Play, ChevronDown, ChevronUp, RefreshCcw, ArrowRight, AlignLeft, Wand2, Layout, PenTool, RotateCcw, ArrowRightCircle, Download, BookOpenCheck, MessageSquare, Info, Flame, Combine, Forward, Link2, Sparkles, Maximize2, Eraser, RefreshCw } from 'lucide-react';
+import { Upload, AlertTriangle, Settings2, Book, Hash, X, Plus, Paperclip, CheckCircle2, FileText, BrainCircuit, Play, ChevronDown, ChevronUp, RefreshCcw, ArrowRight, AlignLeft, Wand2, Layout, PenTool, RotateCcw, ArrowRightCircle, Download, BookOpenCheck, MessageSquare, Info, Flame, Combine, Forward, Link2, Sparkles, Maximize2, Eraser, RefreshCw, Cpu } from 'lucide-react';
 import { NovelSettings, POV, Project, SavedStory, SavedStyle, AiPreset } from '../types.ts';
-import { analyzeProjectContext, generateNovelStep, continueStoryStream, analyzeRawStoryIdea, refineText, GEMINI_MODELS } from '../services/geminiService.ts';
+import { analyzeProjectContext, generateNovelStep, continueStoryStream, analyzeRawStoryIdea, refineText, AI_MODELS } from '../services/geminiService.ts';
 import { AI_PROMPTS } from '../services/prompts.ts';
 import AiRefinePanel from './AiRefinePanel.tsx';
 
@@ -143,11 +143,19 @@ const Controls: React.FC<ControlsProps> = ({
       if (!settings.synopsis) return alert("줄거리를 입력해주세요.");
       setIsAnalyzingStory(true);
       try {
-          const grokOptions = (settings.aiProvider === 'grok' && settings.grokApiKey) 
-            ? { apiKey: settings.grokApiKey, model: settings.grokModel || 'grok-3' }
+          const grokOptions = settings.grokApiKey 
+            ? { apiKey: settings.grokApiKey }
             : undefined;
 
-          const result = await analyzeRawStoryIdea(settings.synopsis, 1, settings.pov, settings.isMature, grokOptions);
+          const selectedModel = settings.manuscriptModel || settings.geminiModel || 'gemini-3-flash-preview';
+          const result = await analyzeRawStoryIdea(
+            settings.synopsis, 
+            1, 
+            settings.pov, 
+            selectedModel, 
+            { apiKey: settings.grokApiKey || '' },
+            { apiKey: settings.magnumApiKey || '' }
+          );
           setStoryAnalysis(result);
           setShowStoryAnalysis(true);
       } catch (e) {
@@ -157,7 +165,32 @@ const Controls: React.FC<ControlsProps> = ({
       }
   };
 
-  const handleAnalyzeContext = async () => { if (!activeProject) return; if (projectStories.length === 0) return alert("프로젝트에 저장된 원고가 없습니다."); setIsAnalyzingContext(true); try { const result = await analyzeProjectContext(projectStories, settings.geminiModel); if (result && onUpdateProject) { const lastUpdate = projectStories.length > 0 ? Math.max(...projectStories.map(s => s.updatedAt || s.createdAt)) : 0; const snapshot = { totalStories: projectStories.length, lastStoryUpdate: lastUpdate, projectUpdate: (activeProject.worldview?.length || 0) + (activeProject.characters?.length || 0) }; onUpdateProject({ ...activeProject, contextAnalysis: result.analysis, contextReferences: result.references, contextSnapshot: snapshot }); setShowContextAnalysis(true); } else { alert("분석 실패"); } } catch (e) { alert("오류 발생"); } finally { setIsAnalyzingContext(false); } };
+  const handleAnalyzeContext = async () => { 
+    if (!activeProject) return; 
+    if (projectStories.length === 0) return alert("프로젝트에 저장된 원고가 없습니다."); 
+    setIsAnalyzingContext(true); 
+    try { 
+        const selectedModel = settings.primaryModel || settings.geminiModel || 'gemini-3-flash-preview';
+        const result = await analyzeProjectContext(
+            projectStories, 
+            selectedModel, 
+            { apiKey: settings.grokApiKey || '' },
+            { apiKey: settings.magnumApiKey || '' }
+        ); 
+        if (result && onUpdateProject) { 
+            const lastUpdate = projectStories.length > 0 ? Math.max(...projectStories.map(s => s.updatedAt || s.createdAt)) : 0; 
+            const snapshot = { totalStories: projectStories.length, lastStoryUpdate: lastUpdate, projectUpdate: (activeProject.worldview?.length || 0) + (activeProject.characters?.length || 0) }; 
+            onUpdateProject({ ...activeProject, contextAnalysis: result.analysis, contextReferences: result.references, contextSnapshot: snapshot }); 
+            setShowContextAnalysis(true); 
+        } else { 
+            alert("분석 실패"); 
+        } 
+    } catch (e) { 
+        alert("오류 발생"); 
+    } finally { 
+        setIsAnalyzingContext(false); 
+    } 
+  };
 
   // --- Generation Logic ---
   
@@ -169,6 +202,7 @@ const Controls: React.FC<ControlsProps> = ({
       try {
           const projectContext = activeProject || null;
           const contextStr = activeProject?.contextAnalysis;
+          const selectedModel = settings.manuscriptModel || settings.geminiModel || 'gemini-3-flash-preview';
           
           await generateNovelStep(
               1, 1, settings, projectContext, 
@@ -178,7 +212,10 @@ const Controls: React.FC<ControlsProps> = ({
               (chunk) => {
                   setLocalGeneratedContent(prev => prev + chunk);
               },
-              storyAnalysis || undefined 
+              storyAnalysis || undefined,
+              selectedModel,
+              { apiKey: settings.grokApiKey || '' },
+              { apiKey: settings.magnumApiKey || '' }
           );
           
           setIsGenerating(false);
@@ -194,9 +231,16 @@ const Controls: React.FC<ControlsProps> = ({
       if(!localGeneratedContent) return;
       setIsGenerating(true);
       try {
-          await continueStoryStream(localGeneratedContent, (chunk) => {
-              setLocalGeneratedContent(prev => prev + chunk);
-          });
+          await continueStoryStream(
+              localGeneratedContent, 
+              (chunk) => {
+                  setLocalGeneratedContent(prev => prev + chunk);
+              },
+              0.7,
+              settings.manuscriptModel || settings.geminiModel || 'gemini-3-flash-preview',
+              { apiKey: settings.grokApiKey || '' },
+              { apiKey: settings.magnumApiKey || '' }
+          );
       } catch(e) {
           alert("이어쓰기 오류");
       } finally {
@@ -217,22 +261,18 @@ const Controls: React.FC<ControlsProps> = ({
   
   const handleStyleSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
       const styleId = e.target.value;
-      if (!styleId) { setSettings(prev => ({ ...prev, activeStyleId: undefined, styleDescription: "", activeStyle: 'general' })); return; }
+      if (!styleId) { setSettings(prev => ({ ...prev, activeStyleId: undefined, styleDescription: "" })); return; }
       const selected = savedStyles.find(s => s.id === styleId);
       if (selected) { 
           setSettings(prev => ({ 
               ...prev, 
               activeStyleId: selected.id, 
-              styleDescription: selected.type === 'general' || selected.type === 'mixed' ? selected.description : prev.styleDescription, 
-              matureStyleDescription: selected.type === 'mature' ? selected.description : prev.matureStyleDescription, 
-              activeStyle: selected.type, 
-              isMature: selected.type === 'mature' ? true : prev.isMature // Do not force mature for mixed
+              styleDescription: selected.description
           })); 
       }
   };
 
-  const isMatureActive = settings.isMature || settings.activeStyle === 'mature';
-  const hasStyle = settings.styleDescription || settings.matureStyleDescription;
+  const hasStyle = settings.styleDescription;
 
   // Helper for text cut off
   const isTextCutOff = (text: string): boolean => {
@@ -250,13 +290,20 @@ const Controls: React.FC<ControlsProps> = ({
       
       setIsRefining(true);
       try {
-          const refined = await refineText(localGeneratedContent, instruction, isMatureActive);
+          const selectedModel = settings.primaryModel || settings.geminiModel || 'gemini-3-flash-preview';
+          const refined = await refineText(
+              localGeneratedContent, 
+              instruction, 
+              selectedModel, 
+              { apiKey: settings.grokApiKey || '' },
+              { apiKey: settings.magnumApiKey || '' }
+          );
           setLocalGeneratedContent(refined);
       } catch(e) { 
           alert("수정 실패"); 
       } finally { 
           setIsRefining(false); 
-      }
+      } 
   };
 
   // AI WORKSTATION UI
@@ -337,7 +384,6 @@ const Controls: React.FC<ControlsProps> = ({
                               currentText={localGeneratedContent}
                               onRefine={handleRefineDraft}
                               isRefining={isRefining}
-                              isMature={isMatureActive}
                               disabled={isGenerating}
                               presets={presets}
                           />
@@ -378,32 +424,32 @@ const Controls: React.FC<ControlsProps> = ({
     <div className="w-full max-w-4xl mx-auto p-6 pb-32 animate-in fade-in duration-300">
       <div className="text-center mb-8"><h2 className="text-3xl font-bold text-indigo-400 mb-2">AI 원고 집필</h2><p className="text-gray-300">프로젝트 설정, 줄거리 분석, 그리고 집필까지. 단계별로 진행하세요.</p></div>
       
-      {/* 19+ Toggle - MOVED TO TOP for Visibility */}
-      <div className="mb-6 flex justify-center">
-          <div 
-            className={`w-full max-w-2xl flex items-center justify-between p-4 rounded-xl border transition-all cursor-pointer shadow-lg select-none ${settings.isMature ? 'bg-red-900/20 border-red-500/50 shadow-red-900/10' : 'bg-gray-800 border-gray-700 hover:border-gray-600'}`} 
-            onClick={() => handleChange('isMature', !settings.isMature)}
-          >
-              <div className="flex items-center gap-4">
-                  <div className={`p-3 rounded-lg transition-colors ${settings.isMature ? 'bg-red-500 text-white' : 'bg-gray-700 text-gray-500'}`}>
-                      <AlertTriangle size={24} />
-                  </div>
-                  <div>
-                      <div className={`font-bold text-lg ${settings.isMature ? 'text-red-400' : 'text-gray-300'}`}>
-                          19+ 성인 모드 {settings.isMature ? "ON" : "OFF"}
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">
-                          {settings.isMature 
-                              ? (settings.aiProvider === 'grok' ? 'Grok 모델 사용 / 19금 전용 학습 및 집필 프롬프트 적용' : '수위 제한 없는 묘사 허용') 
-                              : '안전한 콘텐츠 필터 적용 / 일반 학습'}
-                      </div>
-                  </div>
-              </div>
-              <div className={`flex items-center justify-center px-4 py-1.5 rounded-full font-bold text-sm transition-all duration-300 ${settings.isMature ? 'bg-red-500 text-white shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 'bg-gray-700 text-gray-400'}`}>
-                  {settings.isMature ? 'ON' : 'OFF'}
-              </div>
+      {/* AI Model Selection - MOVED TO TOP */}
+      <div className="mb-6 p-4 bg-gray-800 border border-gray-700 rounded-xl shadow-lg">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+             <div className="flex items-center gap-3">
+                 <div className="p-2 bg-indigo-900/30 rounded-lg text-indigo-400">
+                     <Cpu size={20} />
+                 </div>
+                 <div>
+                     <label className="text-sm font-bold text-gray-200 block">집필 AI 모델</label>
+                     <p className="text-[10px] text-gray-500">이 프로젝트의 원고 집필과 스토리 학습에 사용됩니다.</p>
+                 </div>
+             </div>
+             <select 
+                 className="bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-sm text-gray-200 outline-none focus:border-indigo-500 min-w-[200px]"
+                 value={settings.manuscriptModel || settings.geminiModel || 'gemini-3-flash-preview'}
+                 onChange={(e) => handleChange('manuscriptModel', e.target.value)}
+             >
+                 {AI_MODELS.map(model => (
+                     <option key={model.id} value={model.id}>{model.name}</option>
+                 ))}
+             </select>
           </div>
       </div>
+      
+      {/* 19+ Toggle - MOVED TO TOP for Visibility */}
+
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
           <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 shadow-lg">
@@ -445,23 +491,11 @@ const Controls: React.FC<ControlsProps> = ({
          <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 shadow-lg">
              {/* ... (Settings Inputs - same as before) ... */}
              <div className="flex items-center gap-2 mb-6 text-indigo-400 font-bold border-b border-gray-700 pb-4"><Settings2 size={18} /> 세부 설정 및 생성</div>
+             
              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                 <div className="space-y-6">
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium text-gray-300 flex items-center gap-2">AI 모델 선택</label>
-                        <select 
-                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-sm text-gray-200 outline-none focus:border-indigo-500"
-                            value={settings.geminiModel || 'gemini-3-flash-preview'}
-                            onChange={(e) => handleChange('geminiModel', e.target.value)}
-                        >
-                            {GEMINI_MODELS.map(model => (
-                                <option key={model.id} value={model.id}>{model.name}</option>
-                            ))}
-                        </select>
-                        <p className="text-[10px] text-gray-500">* 최신 모델일수록 성능이 좋지만 속도가 느릴 수 있습니다.</p>
-                    </div>
                     <div className="space-y-2"><label className="text-sm font-medium text-gray-300 flex justify-between">추가 지침 (Guidelines)<button onClick={() => guidelineFileRef.current?.click()} className="text-xs text-indigo-400 flex gap-1 items-center hover:text-indigo-300"><Upload size={12}/> 파일</button><input type="file" ref={guidelineFileRef} className="hidden" accept=".txt" onChange={(e) => handleFileUpload(e, 'guidelines')} /></label><textarea className="w-full h-24 bg-gray-900 border border-gray-700 rounded-lg p-3 text-xs text-gray-300 outline-none focus:border-indigo-500 resize-none" placeholder="대사 톤, 특정 행동 등 세부적인 지시사항" value={settings.guidelines} onChange={(e) => handleChange('guidelines', e.target.value)} /></div>
-                    <div className="space-y-2"><label className="text-sm font-medium text-gray-300 flex items-center gap-2">문체 설정 (Style)</label><select className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-sm text-gray-200 outline-none focus:border-indigo-500 mb-2" value={settings.activeStyleId || ''} onChange={handleStyleSelect}><option value="">(기본 문체)</option>{savedStyles.map(s => (<option key={s.id} value={s.id}>{s.type === 'mature' ? '🔞 ' : s.type === 'mixed' ? '🔄 ' : ''}{s.name}</option>))}</select>{hasStyle ? (<div className={`p-3 border rounded-lg text-xs flex items-center gap-2 ${settings.activeStyle === 'mature' ? 'bg-red-900/20 border-red-500/30 text-red-400' : settings.activeStyle === 'mixed' ? 'bg-amber-900/20 border-amber-500/30 text-amber-400' : 'bg-green-900/20 border-green-500/30 text-green-400'}`}>{settings.activeStyle === 'mature' ? <Flame size={14}/> : settings.activeStyle === 'mixed' ? <Combine size={14}/> : <CheckCircle2 size={14} />} <span>{settings.activeStyle === 'mature' ? '19금 전용 문체' : settings.activeStyle === 'mixed' ? '복합 문체 (일반+19)' : '학습된 일반 문체'}가 적용됩니다.</span></div>) : (<div className="p-3 bg-gray-900 border border-gray-700 rounded-lg text-xs text-gray-500 flex items-center gap-2"><Info size={14} /> <span>저장된 문체를 선택하거나 설정에서 학습시키세요.</span></div>)}</div>
+                    <div className="space-y-2"><label className="text-sm font-medium text-gray-300 flex items-center gap-2">문체 설정 (Style)</label><select className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-sm text-gray-200 outline-none focus:border-indigo-500 mb-2" value={settings.activeStyleId || ''} onChange={handleStyleSelect}><option value="">(기본 문체)</option>{savedStyles.map(s => (<option key={s.id} value={s.id}>{s.name}</option>))}</select>{hasStyle ? (<div className="p-3 border rounded-lg text-xs flex items-center gap-2 bg-green-900/20 border-green-500/30 text-green-400"><CheckCircle2 size={14} /> <span>학습된 일반 문체가 적용됩니다.</span></div>) : (<div className="p-3 bg-gray-900 border border-gray-700 rounded-lg text-xs text-gray-500 flex items-center gap-2"><Info size={14} /> <span>저장된 문체를 선택하거나 설정에서 학습시키세요.</span></div>)}</div>
                 </div>
                 <div className="space-y-6">
                      <div className="space-y-2"><label className="text-xs font-medium text-gray-500 flex items-center gap-1"><Hash size={12}/>해시태그 (분위기/키워드)</label><div className="flex gap-2"><input className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs outline-none focus:border-indigo-500" placeholder="키워드 입력 (Enter)" value={hashtagInput} onChange={(e) => setHashtagInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addHashtag()} /><button onClick={addHashtag} className="bg-gray-700 hover:bg-gray-600 px-2 rounded text-gray-300"><Plus size={14}/></button></div><div className="flex flex-wrap gap-1.5 min-h-[24px]">{settings.hashtags?.map(tag => (<span key={tag} className="px-2 py-0.5 bg-indigo-900/20 border border-indigo-500/20 text-indigo-300 text-[10px] rounded-full flex items-center gap-1">{tag} <button onClick={() => removeHashtag(tag)}><X size={8}/></button></span>))}</div></div>
