@@ -91,11 +91,11 @@ function App() {
   const [savedStyles, setSavedStyles] = useState<SavedStyle[]>([]);
   
   // Computed Lists (Active vs Deleted)
-  const activeProjects = projects.filter(p => !p.deletedAt);
-  const deletedProjects = projects.filter(p => !!p.deletedAt);
+  const activeProjects = (Array.isArray(projects) ? projects : []).filter(p => !p.deletedAt);
+  const deletedProjects = (Array.isArray(projects) ? projects : []).filter(p => !!p.deletedAt);
   
-  const activeStories = savedStories.filter(s => !s.deletedAt);
-  const deletedStories = savedStories.filter(s => !!s.deletedAt);
+  const activeStories = (Array.isArray(savedStories) ? savedStories : []).filter(s => !s.deletedAt);
+  const deletedStories = (Array.isArray(savedStories) ? savedStories : []).filter(s => !!s.deletedAt);
 
   // Idea Explorer
   const [ideaSessions, setIdeaSessions] = useState<IdeaSession[]>(() => {
@@ -421,16 +421,20 @@ function App() {
       } else {
         // Guest Mode fallback
         const savedProjects = localStorage.getItem('nc_projects');
-        setProjects(savedProjects ? JSON.parse(savedProjects) : []);
+        const parsedProjects = savedProjects ? JSON.parse(savedProjects) : [];
+        setProjects(Array.isArray(parsedProjects) ? parsedProjects : []);
         
         const savedStories = localStorage.getItem('nc_stories');
-        setSavedStories(savedStories ? JSON.parse(savedStories) : []);
+        const parsedStories = savedStories ? JSON.parse(savedStories) : [];
+        setSavedStories(Array.isArray(parsedStories) ? parsedStories : []);
 
         const savedStylesLocal = localStorage.getItem('nc_styles');
-        setSavedStyles(savedStylesLocal ? JSON.parse(savedStylesLocal) : []);
+        const parsedStyles = savedStylesLocal ? JSON.parse(savedStylesLocal) : [];
+        setSavedStyles(Array.isArray(parsedStyles) ? parsedStyles : []);
         
         const savedSessions = localStorage.getItem('nc_idea_sessions');
-        setIdeaSessions(savedSessions ? JSON.parse(savedSessions) : []);
+        const parsedSessions = savedSessions ? JSON.parse(savedSessions) : [];
+        setIdeaSessions(Array.isArray(parsedSessions) ? parsedSessions : []);
         
         // Ensure Global Settings are loaded for guest
         const savedGlobal = localStorage.getItem('nc_global_settings');
@@ -597,8 +601,8 @@ function App() {
     if (!generatedContent) return;
     setIsLoading(true);
     try {
-      const level = settings.creativityLevel || 3;
-      const temp = 0.2 + (Math.max(1, Math.min(10, level)) - 1) * (0.7 / 9);
+      const level = settings.creativityLevel || 7;
+      const temp = level / 10;
       const model = settings.selectedModel || settings.geminiModel || 'gemini-3-flash-preview';
       
       await continueStoryStream(generatedContent, (chunk) => setGeneratedContent((prev) => prev + chunk), temp, model);
@@ -610,7 +614,7 @@ function App() {
     setIsLoading(true);
     try {
       const model = settings.selectedModel || settings.geminiModel || 'gemini-3-flash-preview';
-      const refined = await refineText(generatedContent, instruction, model);
+      const refined = await refineText(generatedContent, instruction, model, settings.creativityLevel || 7);
       setGeneratedContent(refined);
     } catch (e) { setError("오류 발생"); } finally { setIsLoading(false); }
   }, [generatedContent, settings.selectedModel, settings.geminiModel]);
@@ -1080,7 +1084,7 @@ function App() {
                       try {
                         const analyzedData = await analyzeManuscript(text);
                         if (analyzedData) {
-                          const worldItems: WorldItem[] = analyzedData.worldview.map((wv) => ({
+                          const worldItems: WorldItem[] = (Array.isArray(analyzedData.worldview) ? analyzedData.worldview : []).map((wv) => ({
                               id: Date.now().toString() + Math.random().toString(36).substr(2, 5), type: 'note', title: wv.title, content: wv.content, parentId: null, createdAt: Date.now()
                           }));
                           const newProject: Project = {
@@ -1106,8 +1110,8 @@ function App() {
                   setIsSettingsOpen={setIsSettingsOpen}
                 />
               );
-            case 'WORLD_BUILDER': return <WorldBuilder projects={activeProjects} stories={activeStories} activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId} onUpdateProject={updateProject} onBack={() => checkUnsavedChanges(() => { setActiveProjectId(null); setCurrentView('HOME'); })} />;
-            case 'CHARACTER_LAB': return <CharacterCreator projects={activeProjects} activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId} onUpdateProject={updateProject} onBack={() => checkUnsavedChanges(() => { setActiveProjectId(null); setCurrentView('HOME'); })} />;
+            case 'WORLD_BUILDER': return <WorldBuilder projects={activeProjects} stories={activeStories} activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId} onUpdateProject={updateProject} onBack={() => checkUnsavedChanges(() => { setActiveProjectId(null); setCurrentView('HOME'); })} settings={settings} selectedModel={settings.selectedModel || settings.geminiModel || 'gemini-3-flash-preview'} />;
+            case 'CHARACTER_LAB': return <CharacterCreator projects={activeProjects} activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId} onUpdateProject={updateProject} onBack={() => checkUnsavedChanges(() => { setActiveProjectId(null); setCurrentView('HOME'); })} settings={settings} selectedModel={settings.selectedModel || settings.geminiModel || 'gemini-3-flash-preview'} />;
             case 'IDEA_EXPLORER': 
                 return <IdeaExplorer 
                     projects={activeProjects} 

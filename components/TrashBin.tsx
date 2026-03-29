@@ -61,7 +61,7 @@ const TrashBin: React.FC<TrashBinProps> = ({
               <div className="text-center py-20 text-gray-500">휴지통이 비었습니다.</div>
             ) : (
               <div className="space-y-2">
-                {deletedProjects.map(p => (
+                {(Array.isArray(deletedProjects) ? deletedProjects : []).map(p => (
                   <div key={p.id} className="flex items-center justify-between p-3 bg-[#1e1e1e] border border-gray-800 rounded-lg group hover:border-gray-600 transition-colors">
                     <div className="flex flex-col">
                       <span className="text-sm font-bold text-gray-200">{p.name}</span>
@@ -92,7 +92,7 @@ const TrashBin: React.FC<TrashBinProps> = ({
               <div className="text-center py-20 text-gray-500">휴지통이 비었습니다.</div>
             ) : (
               <div className="space-y-2">
-                {deletedStories.map(s => (
+                {(Array.isArray(deletedStories) ? deletedStories : []).map(s => (
                   <div key={s.id} className="flex items-center justify-between p-3 bg-[#1e1e1e] border border-gray-800 rounded-lg group hover:border-gray-600 transition-colors">
                     <div className="flex items-center gap-3 overflow-hidden">
                       <div className={`p-2 rounded-lg shrink-0 ${s.category === 'synopsis' ? 'bg-cyan-900/30 text-cyan-400' : 'bg-indigo-900/30 text-indigo-400'}`}>

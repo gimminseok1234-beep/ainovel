@@ -119,7 +119,7 @@ const StyleManager: React.FC<StyleManagerProps> = ({
                         <div className="text-center text-gray-500 py-10">저장된 문체가 없습니다.</div>
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {savedStyles.map(style => (
+                            {(Array.isArray(savedStyles) ? savedStyles : []).map(style => (
                                 <div 
                                     key={style.id} 
                                     onClick={() => openDetail(style)}

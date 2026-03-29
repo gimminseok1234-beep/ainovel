@@ -188,7 +188,7 @@ export const DEFAULT_SETTINGS: NovelSettings = {
   styleDescription: "",
   guidelines: "",
   hashtags: [],
-  creativityLevel: 3,
+  creativityLevel: 7,
   geminiModel: 'gemini-3-flash-preview',
   selectedModel: 'gemini-3-flash-preview',
   primaryModel: 'gemini-3-flash-preview',

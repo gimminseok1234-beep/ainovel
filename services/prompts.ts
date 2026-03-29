@@ -84,7 +84,7 @@ export const getGeneralSynopsisPrompt = (rawSynopsis: string, contextData: strin
       - 명사형 종결(예: "차가운 침묵."), 영탄법, 서리법, 말줄임표 등을 적절히 섞어 문장의 맛을 살리십시오.
 
   ${styleGuide ? `*** STYLE GUIDE ***\n${styleGuide}` : ''}
-
+  
   # Output Format
   Strictly return a JSON Array. No markdown formatting.
   [ 
@@ -96,6 +96,60 @@ export const getGeneralSynopsisPrompt = (rawSynopsis: string, contextData: strin
     } 
   ]
   Language: Korean.
+  `;
+
+export const getStreamingSynopsisPrompt = (rawSynopsis: string, contextData: string, structureInstruction: string, styleGuide?: string) => `
+  # Role
+  당신은 모든 장르(로맨스, 판타지, 현판, 무협, 스릴러 등)를 아우르는 웹소설 플랫폼의 '메인 에디터'이자 '문장 연금술사'입니다.
+  당신의 능력은 투박하고 압축된 문장(Tell)을 독자가 눈앞에서 보는 듯한 생생한 장면(Show)으로 확장하고, 캐릭터의 깊은 감정을 불어넣는 것입니다.
+
+  # Input Data
+  [막 쓴 시놉시스]:
+  """
+  ${rawSynopsis}
+  """
+
+  # Context
+  ${contextData}
+
+  # Instructions (핵심 작업 지침)
+
+  1. **Structure (구조)**:
+     - ${structureInstruction}
+     - 각 챕터나 장면의 구분을 명확히 하되, 전체적으로 하나의 긴 호흡을 가진 '정제된 원고 설계도'로 작성하십시오.
+
+  2. **대사 절대 보존의 법칙**:
+      - 원문에 있는 대사(큰따옴표 "")는 **단 한 글자도 수정하지 말고 그대로 유지**하십시오.
+      - 단, 장면의 몰입도를 위해 필요한 *새로운 대사*나 *독백*은 맥락에 맞게 자유롭게 추가하십시오.
+
+  3. **문장의 초해상도 확장 (Deep Expansion & Zoom-In)**:
+      - 단순한 서술("사랑했다", "화냈다", "밥을 먹었다", "죽였다")을 발견하면 절대 그대로 쓰지 마십시오.
+      - 해당 문장을 **나노 단위의 행동**과 **감각**으로 쪼개어 3~5문장으로 확장하십시오.
+      - **확장 가이드**:
+          * **시각/청각/후각/촉각 활용**: 공기의 온도, 들려오는 소음, 피부에 닿는 감촉, 미세한 떨림 등을 묘사.
+          * **마이크로 액션**: 단순히 '봤다'가 아니라 '동공이 흔들렸다', '입술을 깨물었다'처럼 구체적인 신체 반응 서술.
+          * **분위기(Atmosphere)**: 해당 장면이 주는 긴장감, 설렘, 공포, 나른함 등의 공기를 묘사.
+
+  4. **맥락 기반의 내면 묘사**:
+      - 행동 이면에 숨겨진 캐릭터의 '진짜 마음'을 서술하십시오.
+      - 겉으로는 웃고 있지만 속으로는 우는지, 행동의 동기가 무엇인지 맥락을 파악해 서술에 녹여내십시오.
+
+  5. **웹소설 특화 문체 (Pacing & Style)**:
+      - 호흡이 짧고 속도감 있는 문장을 사용하십시오.
+      - 독자가 지루할 틈을 주지 않는 '흡입력 있는 단어'를 선택하십시오.
+
+  6. **종결어미의 리듬감 부여**:
+      - '~했다', '~이다'의 반복을 엄격히 금지합니다.
+      - 명사형 종결(예: "차가운 침묵."), 영탄법, 서리법, 말줄임표 등을 적절히 섞어 문장의 맛을 살리십시오.
+
+  ${styleGuide ? `*** STYLE GUIDE ***\n${styleGuide}` : ''}
+
+  # Output Format
+  - **JSON 형식을 사용하지 마십시오.**
+  - 마크다운(Markdown) 형식을 사용하여 제목과 본문을 구분하십시오.
+  - 텍스트로만 쭈욱- 이어서 작성하십시오.
+  - 제목은 ## 또는 ### 을 사용하십시오.
+  - Language: Korean.
   `;
 
 

@@ -219,7 +219,8 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
               activeProject || null, 
               userMsg.text, 
               contextAnalysis || undefined, 
-              selectedModel
+              selectedModel,
+              settings.creativityLevel || 7
           );
           const aiMsg: ChatMessage = {
               id: (Date.now() + 1).toString(),
@@ -240,7 +241,8 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
               updatedSession.messages, 
               contextAnalysis || undefined,
               attachedStyle?.description,
-              selectedModel
+              selectedModel,
+              settings.creativityLevel || 7
           );
 
           // Parse Data Blocks
@@ -382,7 +384,8 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
               activeProject || null, 
               requestText + " (이전과 다른 새로운 옵션 3가지 제안)", 
               contextAnalysis || undefined, 
-              selectedModel
+              selectedModel,
+              settings.creativityLevel || 7
           );
           const aiMsg: ChatMessage = { id: Date.now().toString(), role: 'model', text: "새로운 시놉시스 초안을 생성했습니다.", createdAt: Date.now(), metadata: { type: 'synopsis_options', options: options } };
           onUpdateSession({ ...activeSession, messages: [...activeSession.messages, aiMsg], updatedAt: Date.now() });
@@ -400,7 +403,8 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
           const detailedText = await expandDetailedSynopsis(
               summary, 
               activeProject || null, 
-              selectedModel
+              selectedModel,
+              settings.creativityLevel || 7
           );
           const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'model', text: `**[${title}] 상세 시놉시스**\n\n${detailedText}`, createdAt: Date.now() };
           onUpdateSession({ ...updatedSession, messages: [...updatedSession.messages, aiMsg], updatedAt: Date.now() });
@@ -573,7 +577,7 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
                 </button>
             </div>
             <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
-                {sortedSessions.map(session => (
+                {(Array.isArray(sortedSessions) ? sortedSessions : []).map(session => (
                     <div key={session.id} onClick={() => setActiveSessionId(session.id)} className={`group p-3 rounded-xl cursor-pointer border transition-all relative ${activeSessionId === session.id ? 'bg-cyan-900/20 border-cyan-500/50 text-white' : 'bg-[#252525] border-gray-800 text-gray-400 hover:bg-gray-800'}`}>
                         <h3 className="font-bold text-sm truncate pr-8">{session.title}</h3>
                         <p className="text-xs opacity-60 mt-1">{new Date(session.updatedAt).toLocaleDateString()}</p>
@@ -609,7 +613,7 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
                                 onChange={(e) => handleProjectChange(e.target.value)}
                             >
                                 <option value="">(프로젝트 연결 안 함 - 자유 대화)</option>
-                                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                {(Array.isArray(projects) ? projects : []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                             </select>
                         </div>
 
@@ -712,7 +716,7 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
                              {/* Analyzed Episodes List */}
                              {contextReferences.length > 0 && (
                                  <div className="flex flex-wrap gap-1 mb-3">
-                                     {contextReferences.map((ref, idx) => (
+                                     {(Array.isArray(contextReferences) ? contextReferences : []).map((ref, idx) => (
                                          <span key={idx} className="text-[10px] px-2 py-0.5 bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 rounded-full">
                                              {ref}
                                          </span>
@@ -738,13 +742,13 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
 
                     {/* Messages */}
                     <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
-                        {activeSession.messages.map((msg) => (
+                        {(Array.isArray(activeSession.messages) ? activeSession.messages : []).map((msg) => (
                             <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                                 <div className={`max-w-[85%] md:max-w-[70%] rounded-2xl p-4 text-sm leading-relaxed shadow-md ${msg.role === 'user' ? 'bg-cyan-700 text-white rounded-tr-none' : 'bg-[#252525] text-gray-200 border border-gray-700 rounded-tl-none'}`}>
                                     {msg.role === 'model' ? <div className="prose prose-invert prose-sm max-w-none whitespace-pre-wrap"><ReactMarkdown>{msg.text}</ReactMarkdown></div> : <div className="whitespace-pre-wrap">{msg.text}</div>}
                                     {msg.metadata?.type === 'synopsis_options' && msg.metadata.options && (
                                         <div className="mt-4 space-y-3">
-                                            {(msg.metadata.options as any[]).map((option: any, optIdx: number) => (
+                                            {(Array.isArray(msg.metadata.options) ? msg.metadata.options : []).map((option: any, optIdx: number) => (
                                                 <div key={optIdx} className="bg-black/20 border border-white/10 rounded-xl p-3 hover:bg-black/30 transition-colors">
                                                     <h4 className="font-bold text-cyan-300 mb-1">{option.title}</h4>
                                                     <p className="text-xs text-gray-300 mb-2 line-clamp-3">{option.summary}</p>
@@ -796,7 +800,7 @@ const IdeaExplorer: React.FC<IdeaExplorerProps> = ({
                                 {isStyleSelectorOpen && (
                                     <div className="absolute bottom-full left-0 mb-2 w-48 bg-[#252525] border border-gray-700 rounded-xl shadow-xl overflow-hidden z-50 max-h-60 overflow-y-auto custom-scrollbar">
                                         <div className="p-2 text-xs font-bold text-gray-500 bg-black/20 border-b border-gray-700">문체 선택</div>
-                                        {savedStyles.map(s => (
+                                        {(Array.isArray(savedStyles) ? savedStyles : []).map(s => (
                                             <button 
                                                 key={s.id}
                                                 onClick={() => { setAttachedStyleId(s.id); setIsStyleSelectorOpen(false); }}

@@ -63,7 +63,7 @@ const AiRefinePanel: React.FC<AiRefinePanelProps> = ({
       />
 
       <div className="grid grid-cols-2 gap-2">
-        {activePresets.map((preset) => (
+        {(Array.isArray(activePresets) ? activePresets : []).map((preset) => (
             <button
                 key={preset.id}
                 onClick={() => setInstruction(preset.prompt)}

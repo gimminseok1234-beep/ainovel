@@ -338,7 +338,7 @@ const Library: React.FC<LibraryProps> = ({
           </div>
         )}
 
-        {projects.map((project) => {
+        {(Array.isArray(projects) ? projects : []).map((project) => {
           const projectStories = stories.filter(s => s.projectId === project.id);
           const isExpanded = expandedProjects.has(project.id);
           const sortedStories = sortStories(projectStories);
@@ -410,7 +410,7 @@ const Library: React.FC<LibraryProps> = ({
                   {sortedStories.length === 0 ? (
                     <p className="text-xs text-gray-500 p-3 pl-9">저장된 원고가 없습니다.</p>
                   ) : (
-                    sortedStories.map((story) => (
+                    (Array.isArray(sortedStories) ? sortedStories : []).map((story) => (
                       <div 
                         key={story.id} 
                         className="flex items-center justify-between p-2 pl-9 hover:bg-gray-800/50 cursor-pointer group border-b border-gray-800/50 last:border-0"

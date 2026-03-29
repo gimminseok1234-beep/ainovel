@@ -85,7 +85,7 @@ const SaveDialog: React.FC<SaveDialogProps> = ({
                   onChange={(e) => setSelectedProjectId(e.target.value)}
                 >
                   <option value="" disabled>프로젝트 선택</option>
-                  {projects.map(p => (
+                  {(Array.isArray(projects) ? projects : []).map(p => (
                     <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
                 </select>

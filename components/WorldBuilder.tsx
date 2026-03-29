@@ -14,6 +14,8 @@ interface WorldBuilderProps {
   onUpdateProject: (project: Project) => void;
   onBack: () => void;
   setActiveProjectId: (id: string) => void;
+  settings: any;
+  selectedModel: string;
 }
 
 const WorldBuilder: React.FC<WorldBuilderProps> = ({ 
@@ -22,7 +24,9 @@ const WorldBuilder: React.FC<WorldBuilderProps> = ({
   activeProjectId, 
   onUpdateProject, 
   onBack,
-  setActiveProjectId
+  setActiveProjectId,
+  settings,
+  selectedModel
 }) => {
   const activeProject = projects.find(p => p.id === activeProjectId);
   
@@ -321,7 +325,9 @@ const WorldBuilder: React.FC<WorldBuilderProps> = ({
           activeProject,
           items,
           userMsg,
-          chatHistory
+          chatHistory,
+          selectedModel,
+          settings.creativityLevel || 7
       );
 
       setChatHistory(prev => [...prev, { role: 'model', content: response.reply }]);
@@ -408,7 +414,7 @@ const WorldBuilder: React.FC<WorldBuilderProps> = ({
           onChange={(e) => setActiveProjectId(e.target.value)}
         >
           <option value="" disabled>프로젝트 선택</option>
-          {projects.map(p => (
+          {(Array.isArray(projects) ? projects : []).map(p => (
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
         </select>
@@ -425,7 +431,7 @@ const WorldBuilder: React.FC<WorldBuilderProps> = ({
                {/* Toolbar / Breadcrumbs */}
                <div className="p-4 border-b border-gray-800 flex items-center justify-between bg-[#1c1c1c] shrink-0">
                   <div className="flex items-center gap-2 overflow-x-auto no-scrollbar mask-gradient-right">
-                     {getBreadcrumbs().map((crumb, idx) => (
+                     {(Array.isArray(getBreadcrumbs()) ? getBreadcrumbs() : []).map((crumb, idx) => (
                        <React.Fragment key={idx}>
                           {idx > 0 && <span className="text-gray-600"><ChevronRight size={14}/></span>}
                           <button 
@@ -469,7 +475,7 @@ const WorldBuilder: React.FC<WorldBuilderProps> = ({
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                       {currentItems.map((item) => (
+                       {(Array.isArray(currentItems) ? currentItems : []).map((item) => (
                           <div 
                              key={item.id}
                              draggable
@@ -557,7 +563,7 @@ const WorldBuilder: React.FC<WorldBuilderProps> = ({
                         )}
                     </div>
 
-                    {chatHistory.map((msg, idx) => (
+                    {(Array.isArray(chatHistory) ? chatHistory : []).map((msg, idx) => (
                         <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                             <div className={`max-w-[85%] rounded-2xl px-5 py-4 shadow-md ${
                                 msg.role === 'user' 

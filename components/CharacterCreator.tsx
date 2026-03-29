@@ -14,6 +14,8 @@ interface CharacterCreatorProps {
   onUpdateProject: (project: Project) => void;
   onBack: () => void;
   setActiveProjectId: (id: string) => void;
+  settings: any;
+  selectedModel: string;
 }
 
 // Helper to serialize objects back to JSON string
@@ -26,7 +28,9 @@ const CharacterCreator: React.FC<CharacterCreatorProps> = ({
   activeProjectId,
   onUpdateProject,
   onBack,
-  setActiveProjectId
+  setActiveProjectId,
+  settings,
+  selectedModel
 }) => {
   const activeProject = projects.find(p => p.id === activeProjectId);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -279,7 +283,14 @@ const CharacterCreator: React.FC<CharacterCreatorProps> = ({
       if (!activeProject) return alert("프로젝트를 선택해주세요.");
       setIsGenerating(true);
       try {
-          const result = await generateCharacterProfile(activeProject.worldview, genName, genRole, genExtra);
+          const result = await generateCharacterProfile(
+              activeProject.worldview, 
+              genName, 
+              genRole, 
+              genExtra, 
+              selectedModel,
+              settings.creativityLevel || 7
+          );
           if (result) {
               setGenProfile({ 
                   ...result, 
@@ -358,7 +369,7 @@ const CharacterCreator: React.FC<CharacterCreatorProps> = ({
                 onChange={(e) => setActiveProjectId(e.target.value)}
             >
                 <option value="" disabled>프로젝트 선택</option>
-                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {(Array.isArray(projects) ? projects : []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
         </header>
 
@@ -404,7 +415,7 @@ const CharacterCreator: React.FC<CharacterCreatorProps> = ({
                     {/* Toolbar */}
                     <div className="p-4 border-b border-gray-800 bg-[#1c1c1c] flex justify-between items-center shrink-0">
                         <div className="flex items-center gap-2 overflow-x-auto no-scrollbar mask-gradient-right max-w-[60%]">
-                            {getBreadcrumbs().map((crumb, idx) => (
+                            {(Array.isArray(getBreadcrumbs()) ? getBreadcrumbs() : []).map((crumb, idx) => (
                                 <React.Fragment key={idx}>
                                     {idx > 0 && <ChevronRight size={14} className="text-gray-600"/>}
                                     <button 
@@ -433,7 +444,7 @@ const CharacterCreator: React.FC<CharacterCreatorProps> = ({
                             </div>
                         ) : (
                             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                                {currentItems.map((item) => (
+                                {(Array.isArray(currentItems) ? currentItems : []).map((item) => (
                                     <div 
                                         key={item.id}
                                         draggable
@@ -500,7 +511,7 @@ const CharacterCreator: React.FC<CharacterCreatorProps> = ({
                                     <div className="bg-[#1c1c1c] p-4 rounded-xl border border-gray-800">
                                         <label className="text-xs text-rose-400 font-bold mb-2 block">해시태그 (Enter로 추가)</label>
                                         <div className="flex flex-wrap gap-2 mb-2">
-                                            {(items[selectedCharIndex].hashtags || []).map((tag, idx) => (
+                                            {(Array.isArray(items[selectedCharIndex].hashtags) ? items[selectedCharIndex].hashtags : []).map((tag, idx) => (
                                                 <span key={idx} className="bg-rose-900/30 text-rose-300 px-2 py-1 rounded text-xs flex items-center gap-1 border border-rose-500/20">
                                                     #{tag}
                                                     <button onClick={() => handleHashtagRemove(tag)} className="hover:text-white"><X size={12}/></button>

@@ -421,7 +421,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
                 </div>
             ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-                {projects.map(project => {
+                {(Array.isArray(projects) ? projects : []).map(project => {
                     const projectStories = stories.filter(s => s.projectId === project.id && s.category !== 'synopsis');
                     return (
                     <div 
@@ -471,7 +471,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
                             <p className="text-sm text-gray-600 italic py-2">아직 작성된 원고가 없습니다.</p>
                         ) : (
                             <div className="space-y-2">
-                            {projectStories.map(story => (
+                            {(Array.isArray(projectStories) ? projectStories : []).map(story => (
                                 <div 
                                 key={story.id} 
                                 className="group/item flex items-center justify-between p-2 hover:bg-gray-700/50 rounded-lg cursor-pointer transition-colors border border-transparent hover:border-gray-600"
@@ -543,7 +543,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
                                               value={settings.primaryModel || 'gemini-3-flash-preview'}
                                               onChange={(e) => handleGrokSettingChange('primaryModel', e.target.value)}
                                           >
-                                              {AI_MODELS.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                          {(Array.isArray(AI_MODELS) ? AI_MODELS : []).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                                           </select>
                                       </div>
                                   </div>
@@ -556,7 +556,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
                                   <div className="flex justify-between items-center mb-2">
                                       <label className="text-sm font-bold text-gray-200 flex items-center gap-2">
                                           자유도 (Creativity)
-                                          <span className="text-purple-400 text-xs font-normal bg-purple-900/30 px-2 py-0.5 rounded-full">Level {settings.creativityLevel || 3}</span>
+                                          <span className="text-purple-400 text-xs font-normal bg-purple-900/30 px-2 py-0.5 rounded-full">Level {settings.creativityLevel || 7}</span>
                                       </label>
                                   </div>
                                   <input 
@@ -564,7 +564,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
                                       min="1" 
                                       max="10" 
                                       step="1" 
-                                      value={settings.creativityLevel || 3}
+                                      value={settings.creativityLevel || 7}
                                       onChange={(e) => handleCreativityChange(parseInt(e.target.value))}
                                       className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
                                   />
@@ -649,7 +649,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
                               </div>
 
                               <div className="space-y-2">
-                                  {currentPresets.map(preset => (
+                                  {(Array.isArray(currentPresets) ? currentPresets : []).map(preset => (
                                       <div 
                                         key={preset.id} 
                                         className={`flex items-center justify-between p-2 rounded border text-xs cursor-pointer transition-all ${editingPresetId === preset.id ? 'border-purple-500 bg-purple-900/20' : 'border-gray-800 bg-gray-900 hover:bg-gray-800'}`}

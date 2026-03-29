@@ -38,7 +38,8 @@ import {
     getExpandDetailedSynopsisPrompt,
     getOrganizeWorldviewPrompt,
     getExtractCharacterPrompt,
-    getProjectAssistantPrompt
+    getProjectAssistantPrompt,
+    getStreamingSynopsisPrompt
 } from "./prompts.ts";
 
 // Initialize client helper
@@ -74,6 +75,7 @@ export const handleApiError = (e: any) => {
 
 export const AI_MODELS = [
     { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', provider: 'gemini' },
+    { id: 'gemini-2.5-pro-preview', name: 'Gemini 2.5 Pro', provider: 'gemini' },
     { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', provider: 'gemini' },
     { id: 'gemini-3.1-flash-preview', name: 'Gemini 3.1 Flash', provider: 'gemini' },
     { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', provider: 'gemini' },
@@ -111,7 +113,8 @@ const callGrokAPI = async (
   model: string,
   apiKey: string,
   onChunk?: (text: string) => void,
-  temperature: number = 0.7
+  temperature: number = 0.7,
+  responseMimeType?: string
 ): Promise<string> => {
   try {
     const effectiveApiKey = (import.meta.env.VITE_GROK_API_KEY || '').trim();
@@ -122,24 +125,35 @@ const callGrokAPI = async (
 
     notifyModelUsage('xAI Grok', effectiveModel);
 
+    const body: any = {
+      messages: messages,
+      model: effectiveModel,
+      stream: !!onChunk, 
+      temperature: temperature,
+      max_tokens: 8192 
+    };
+
+    if (responseMimeType === 'application/json') {
+      body.response_format = { type: "json_object" };
+    }
+
     const response = await fetch("https://api.x.ai/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${effectiveApiKey}`
       },
-      body: JSON.stringify({
-        messages: messages,
-        model: effectiveModel,
-        stream: true, 
-        temperature: temperature,
-        max_tokens: 8192 
-      })
+      body: JSON.stringify(body)
     });
 
     if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`Grok API Error: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+
+    if (!onChunk) {
+      const data = await response.json();
+      return data.choices?.[0]?.message?.content || "";
     }
 
     if (!response.body) throw new Error("Grok API response body is empty");
@@ -167,14 +181,16 @@ const callGrokAPI = async (
               fullText += content;
               if (onChunk) onChunk(content);
             }
-          } catch (e) { handleApiError(e); 
+          } catch (e) { 
+            handleApiError(e);
             // Ignore incomplete chunks
           }
         }
       }
     }
     return fullText;
-  } catch (e) { handleApiError(e); 
+  } catch (e) { 
+    handleApiError(e);
     console.error("Grok API Error", e);
     throw new Error(`Grok API Error: ${e instanceof Error ? e.message : 'Unknown error'}`);
   }
@@ -211,6 +227,7 @@ const callMagnumAPI = async (
           messages: messages,
           temperature: temperature,
           stream: true,
+          maxTokens: 8192, // Ensure enough tokens for long novel generation
         },
       });
 
@@ -218,12 +235,18 @@ const callMagnumAPI = async (
       // We need to check if it's an EventStream
       if ('[Symbol.asyncIterator]' in response) {
         let fullText = "";
-        for await (const chunk of response) {
-          const content = chunk.choices?.[0]?.delta?.content || "";
-          if (content) {
-            fullText += content;
-            onChunk(content);
+        try {
+          for await (const chunk of response) {
+            const content = chunk.choices?.[0]?.delta?.content || "";
+            if (content) {
+              fullText += content;
+              onChunk(content);
+            }
           }
+        } catch (streamError) {
+          console.warn("Magnum Stream interrupted, returning partial text:", streamError);
+          if (fullText) return fullText;
+          throw streamError;
         }
         return fullText;
       } else {
@@ -240,6 +263,7 @@ const callMagnumAPI = async (
           messages: messages,
           temperature: temperature,
           stream: false,
+          maxTokens: 8192,
         },
       });
       
@@ -254,6 +278,21 @@ const callMagnumAPI = async (
 
 const cleanJson = (text: string): string => {
   if (!text) return "";
+  
+  // Find the outermost JSON structure
+  const firstOpen = text.search(/[\{\[]/);
+  if (firstOpen !== -1) {
+    const lastClose = Math.max(text.lastIndexOf('}'), text.lastIndexOf(']'));
+    if (lastClose !== -1 && lastClose > firstOpen) {
+      const candidate = text.substring(firstOpen, lastClose + 1);
+      // Basic validation to ensure it's likely JSON
+      if (candidate.startsWith('{') && candidate.endsWith('}') || 
+          candidate.startsWith('[') && candidate.endsWith(']')) {
+        return candidate;
+      }
+    }
+  }
+
   let cleaned = text.trim();
   if (cleaned.startsWith('```json')) cleaned = cleaned.substring(7);
   else if (cleaned.startsWith('```')) cleaned = cleaned.substring(3);
@@ -283,7 +322,8 @@ export const refineSynopsisWithContext = async (
   preAnalyzedContext?: string,
   styleGuide?: string,
   targetChapterCount: number = 1,
-  model: string = 'gemini-3-flash-preview'
+  model: string = 'gemini-3-flash-preview',
+  creativityLevel: number = 7
 ): Promise<RefinedSynopsisCard[]> => {
   
   let contextData = "";
@@ -292,9 +332,9 @@ export const refineSynopsisWithContext = async (
   }
   if (preAnalyzedContext) {
       contextData += `=== PROJECT STORY CONTEXT ===\n${preAnalyzedContext}\n`;
-  } else if (recentStories.length > 0) {
+  } else if (Array.isArray(recentStories) && recentStories.length > 0) {
       const sortedStories = [...recentStories].sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt)).slice(0, 5).reverse(); 
-      contextData += `=== RECENT STORY FLOW ===\n${sortedStories.map((s, i) => `[Ep ${i+1}: ${s.title}]\n${s.content.slice(-2000)}`).join('\n\n')}\n`;
+      contextData += `=== RECENT STORY FLOW ===\n${(Array.isArray(sortedStories) ? sortedStories : []).map((s, i) => `[Ep ${i+1}: ${s.title}]\n${s.content.slice(-2000)}`).join('\n\n')}\n`;
   }
 
   const structureInstruction = targetChapterCount > 1
@@ -304,12 +344,12 @@ export const refineSynopsisWithContext = async (
   const prompt = getGeneralSynopsisPrompt(rawSynopsis, contextData, structureInstruction, styleGuide);
 
   try {
-    const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
     const result = await callAI(
         [{ role: 'user', content: prompt }],
-        effectiveModel,
+        model,
         {
-            responseMimeType: 'application/json'
+            responseMimeType: 'application/json',
+            creativityLevel: creativityLevel
         }
     );
     return JSON.parse(cleanJson(result)) as RefinedSynopsisCard[];
@@ -319,16 +359,60 @@ export const refineSynopsisWithContext = async (
   }
 };
 
+export const refineSynopsisStream = async (
+  rawSynopsis: string,
+  project: Project | null,
+  recentStories: SavedStory[],
+  onChunk: (text: string) => void,
+  preAnalyzedContext?: string,
+  styleGuide?: string,
+  targetChapterCount: number = 1,
+  model: string = 'gemini-3-flash-preview',
+  creativityLevel: number = 7
+): Promise<string> => {
+  
+  let contextData = "";
+  if (project) {
+    contextData += `=== PROJECT WORLDVIEW ===\n${parseWorldviewContext(project.worldview)}\n\n=== CHARACTERS ===\n${project.characters}\n`;
+  }
+  if (preAnalyzedContext) {
+      contextData += `=== PROJECT STORY CONTEXT ===\n${preAnalyzedContext}\n`;
+  } else if (Array.isArray(recentStories) && recentStories.length > 0) {
+      const sortedStories = [...recentStories].sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt)).slice(0, 5).reverse(); 
+      contextData += `=== RECENT STORY FLOW ===\n${(Array.isArray(sortedStories) ? sortedStories : []).map((s, i) => `[Ep ${i+1}: ${s.title}]\n${s.content.slice(-2000)}`).join('\n\n')}\n`;
+  }
+
+  const structureInstruction = targetChapterCount > 1
+    ? `**Structure**: You MUST split the narrative into **EXACTLY ${targetChapterCount}** distinct chapters/sequences. Expand the user's input to fill these chapters if necessary.`
+    : `**Structure**: Check for user-defined chapter markers (e.g., "Chapter 1", "1화"). If the user did NOT explicitly mark chapters, you MUST return **EXACTLY ONE** chapter containing the entire story. Do NOT split it into multiple chapters arbitrarily.`;
+
+  const prompt = getStreamingSynopsisPrompt(rawSynopsis, contextData, structureInstruction, styleGuide);
+
+  try {
+    return await callAI(
+        [{ role: 'user', content: prompt }],
+        model,
+        {
+            onChunk,
+            creativityLevel: creativityLevel
+        }
+    );
+  } catch (e) { 
+    handleApiError(e); 
+    console.error("Synopsis streaming refinement failed", e);
+    throw e;
+  }
+};
+
 export const analyzeSynopsisReference = async (
     text: string, 
     model: string = 'gemini-3-flash-preview'
 ): Promise<string> => {
     const prompt = getReferenceAnalysisPrompt(text);
     try {
-        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         return await callAI(
             [{ role: 'user', content: prompt }],
-            effectiveModel
+            model
         );
     } catch (e) {
         handleApiError(e);
@@ -361,34 +445,20 @@ export const generateNovelStep = async (
     const systemPrompt = GENERAL_SYSTEM_PROMPT;
     
     try {
-        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         return await callAI(
             [
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: promptContext }
             ],
-            effectiveModel,
+            model,
             {
                 onChunk,
-                temperature: 0.7
+                creativityLevel: settings.creativityLevel || 7
             }
         );
     } catch (e: any) {
         handleApiError(e);
         console.error(`AI generation failed with model ${model}:`, e);
-        
-        // Fallback logic for Gemini only
-        if (!isGrokModel(model) && !isMagnumModel(model) && (e.message?.includes('403') || e.message?.includes('404') || e.message?.includes('not found'))) {
-            console.warn(`Falling back to gemini-3-flash-preview due to error with ${model}`);
-            return await callAI(
-                [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: promptContext }
-                ],
-                'gemini-3-flash-preview',
-                { onChunk, temperature: 0.7 }
-            );
-        }
         throw e;
     }
 };
@@ -482,32 +552,33 @@ export const callAI = async (
     options: {
         onChunk?: (text: string) => void,
         temperature?: number,
+        creativityLevel?: number,
         responseMimeType?: string
     } = {}
 ): Promise<string> => {
     const isGrok = isGrokModel(model);
     const isMagnum = isMagnumModel(model);
 
+    // Map creativityLevel to temperature if temperature is not provided
+    const effectiveTemperature = options.temperature !== undefined 
+        ? options.temperature 
+        : (options.creativityLevel !== undefined ? options.creativityLevel / 10 : 0.7);
+
     if (isGrok) {
-        try {
-            return await callGrokAPI(messages, model, '', options.onChunk, options.temperature);
-        } catch (e) {
-            console.error("Grok API failed, falling back to Gemini", e);
-            return await callAI(messages, 'gemini-3-flash-preview', options);
-        }
+        return await callGrokAPI(messages, model, '', options.onChunk, effectiveTemperature, options.responseMimeType);
     } else if (isMagnum) {
         // Magnum (OpenRouter) does not fallback to Gemini as per user request
-        return await callMagnumAPI(messages, model, '', options.onChunk, options.temperature);
+        return await callMagnumAPI(messages, model, '', options.onChunk, effectiveTemperature);
     } else {
-        const key = import.meta.env.VITE_GEMINI_API_KEY || "";
+        const key = process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || "";
         if (!key) {
-            throw new Error("Gemini API Key is missing. Please set VITE_GEMINI_API_KEY in your environment.");
+            throw new Error("Gemini API Key is missing. Please set GEMINI_API_KEY in your environment.");
         }
         
         const systemMsg = messages.find(m => m.role === 'system')?.content;
         
         const config: any = { 
-            temperature: options.temperature,
+            temperature: effectiveTemperature,
             responseMimeType: options.responseMimeType,
             maxOutputTokens: 8192,
             systemInstruction: systemMsg
@@ -526,10 +597,9 @@ export const analyzeRawStoryIdea = async (
     const prompt = getRawStoryIdeaAnalysisPrompt(idea, chapterCount, pov);
 
     try {
-        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         return await callAI(
             [{ role: 'user', content: prompt }],
-            effectiveModel,
+            model,
             {
                 temperature: 0.8
             }
@@ -545,17 +615,18 @@ export const generateStoryArch = async (
     chapterCount: number, 
     analysisContext?: string, 
     preserveSynopsis: boolean = false,
-    model: string = 'gemini-3-flash-preview'
+    model: string = 'gemini-3-flash-preview',
+    creativityLevel: number = 7
 ): Promise<StoryDetails | null> => {
     const prompt = getStoryArchPrompt(idea, analysisContext, preserveSynopsis, chapterCount);
 
     try {
-        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         const resp = await callAI(
             [{ role: 'user', content: prompt }],
-            effectiveModel,
+            model,
             {
-                responseMimeType: 'application/json'
+                responseMimeType: 'application/json',
+                creativityLevel: creativityLevel
             }
         );
         return JSON.parse(cleanJson(resp));
@@ -571,17 +642,18 @@ export const generateEpisodeOutline = async (
     hashtags: string[], 
     storyDetails: StoryDetails, 
     preserveSynopsis: boolean = false,
-    model: string = 'gemini-3-flash-preview'
+    model: string = 'gemini-3-flash-preview',
+    creativityLevel: number = 7
 ): Promise<ChapterOutline[]> => {
     const prompt = getEpisodeOutlinePrompt(chapterCount, storyDetails);
 
     try {
-        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         const resp = await callAI(
             [{ role: 'user', content: prompt }],
-            effectiveModel,
+            model,
             {
-                responseMimeType: 'application/json'
+                responseMimeType: 'application/json',
+                creativityLevel: creativityLevel
             }
         );
         return JSON.parse(cleanJson(resp));
@@ -597,10 +669,9 @@ export const continueStoryStream = async (
     const prompt = getContinueStoryPrompt(currentContent);
     
     try {
-        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         return await callAI(
             [{ role: 'user', content: prompt }],
-            effectiveModel,
+            model,
             {
                 onChunk,
                 temperature
@@ -615,15 +686,16 @@ export const continueStoryStream = async (
 export const refineText = async (
     text: string, 
     instruction: string, 
-    model: string = 'gemini-3-flash-preview'
+    model: string = 'gemini-3-flash-preview',
+    creativityLevel: number = 7
 ): Promise<string> => {
     const prompt = getRefineTextPrompt(text, instruction);
     
     try {
-        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         return await callAI(
             [{ role: 'user', content: prompt }],
-            effectiveModel
+            model,
+            { creativityLevel: creativityLevel }
         );
     } catch (e) {
         handleApiError(e);
@@ -635,10 +707,9 @@ export const analyzeManuscript = async (text: string, model: string = 'gemini-3-
     const prompt = getManuscriptAnalysisPrompt(text);
     
     try {
-        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         const responseText = await callAI(
             [{ role: 'user', content: prompt }],
-            effectiveModel,
+            model,
             {
                 responseMimeType: 'application/json'
             }
@@ -655,6 +726,7 @@ const extractChapterNumber = (title: string): number => {
 };
 
 const sortStoriesByChapter = (stories: SavedStory[]) => {
+    if (!Array.isArray(stories)) return [];
     return [...stories].sort((a, b) => {
         const titleA = a.title.toLowerCase();
         const titleB = b.title.toLowerCase();
@@ -685,7 +757,7 @@ export const analyzeProjectContext = async (
     stories: SavedStory[],
     model: string = 'gemini-3-flash-preview'
 ): Promise<{ analysis: string; references: string[] } | null> => {
-    if (!stories || stories.length === 0) {
+    if (!Array.isArray(stories) || stories.length === 0) {
         return null;
     }
 
@@ -693,20 +765,19 @@ export const analyzeProjectContext = async (
     const sortedStories = sortStoriesByChapter(stories);
 
     // 2. Select the 3 most recent stories to provide context
-    const recentStories = sortedStories.slice(-3);
+    const recentStories = (Array.isArray(sortedStories) ? sortedStories : []).slice(-3);
 
     // 3. Extract the last 2000 characters of each story to build the context sample
-    const contextSample = recentStories
+    const contextSample = (Array.isArray(recentStories) ? recentStories : [])
         .map((story) => `[Title: ${story.title}]\nContent Segment (End):\n"...${story.content.slice(-2000)}"`)
         .join('\n\n');
 
     const prompt = getProjectContextAnalysisPrompt(contextSample);
 
     try {
-        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         const analysisText = await callAI(
             [{ role: 'user', content: prompt }],
-            effectiveModel
+            model
         );
         return {
             analysis: analysisText,
@@ -749,7 +820,8 @@ export const chatWithWorldBuilderAIAssistant = async (
     worldItems: any[],
     userMsg: string,
     history: any[],
-    model: string = 'gemini-3.1-pro-preview'
+    model: string = 'gemini-3.1-pro-preview',
+    creativityLevel: number = 7
 ): Promise<{ reply: string, suggestedItem?: { title: string, content: string, type: 'folder' | 'note' } }> => {
     const prompt = `
     You are an AI World Building Assistant for a story project.
@@ -791,7 +863,8 @@ export const chatWithWorldBuilderAIAssistant = async (
             ],
             model,
             {
-                responseMimeType: 'application/json'
+                responseMimeType: 'application/json',
+                creativityLevel: creativityLevel
             }
         );
         
@@ -815,17 +888,18 @@ export const generateCharacterProfile = async (
     name: string, 
     role: string, 
     extra?: string,
-    model: string = 'gemini-3-flash-preview'
+    model: string = 'gemini-3-flash-preview',
+    creativityLevel: number = 7
 ): Promise<CharacterProfile | null> => {
     const prompt = getCharacterProfilePrompt(worldview, name, role, extra);
     
     try {
-        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         const responseText = await callAI(
             [{ role: 'user', content: prompt }],
-            effectiveModel,
+            model,
             {
-                responseMimeType: 'application/json'
+                responseMimeType: 'application/json',
+                creativityLevel: creativityLevel
             }
         );
         if (responseText) return JSON.parse(cleanJson(responseText));
@@ -839,10 +913,9 @@ export const generateRelationshipMap = async (
 ): Promise<CharacterRelationship[]> => {
     const prompt = getRelationshipMapPrompt(charactersJson);
     try {
-        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         const responseText = await callAI(
             [{ role: 'user', content: prompt }],
-            effectiveModel,
+            model,
             {
                 responseMimeType: 'application/json'
             }
@@ -891,7 +964,8 @@ export const chatWithIdeaPartner = async (
     messages: ChatMessage[], 
     contextAnalysis?: string, 
     styleDescription?: string,
-    model: string = 'gemini-3-flash-preview'
+    model: string = 'gemini-3-flash-preview',
+    creativityLevel: number = 7
 ): Promise<string> => {
     const history = messages.map(m => ({ role: m.role, content: m.text }));
     const lastMsg = history.pop();
@@ -901,14 +975,14 @@ export const chatWithIdeaPartner = async (
     const systemPrompt = getIdeaPartnerSystemPrompt(project, contextAnalysis, styleDescription);
     
     try {
-        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         return await callAI(
             [
                 { role: 'system', content: systemPrompt },
                 ...history,
                 lastMsg
             ],
-            effectiveModel
+            model,
+            { creativityLevel: creativityLevel }
         );
     } catch (e) {
         handleApiError(e);
@@ -920,16 +994,17 @@ export const generateSynopsisOptions = async (
     project: Project | null, 
     input: string, 
     contextAnalysis?: string,
-    model: string = 'gemini-3-flash-preview'
+    model: string = 'gemini-3-flash-preview',
+    creativityLevel: number = 7
 ): Promise<any[]> => {
     const prompt = getSynopsisOptionsPrompt(input, contextAnalysis);
     try {
-        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         const responseText = await callAI(
             [{ role: 'user', content: prompt }],
-            effectiveModel,
+            model,
             {
-                responseMimeType: 'application/json'
+                responseMimeType: 'application/json',
+                creativityLevel: creativityLevel
             }
         );
         if (responseText) return JSON.parse(cleanJson(responseText));
@@ -940,13 +1015,15 @@ export const generateSynopsisOptions = async (
 export const expandDetailedSynopsis = async (
     summary: string, 
     project: Project | null,
-    model: string = 'gemini-3.1-pro-preview'
+    model: string = 'gemini-3.1-pro-preview',
+    creativityLevel: number = 7
 ): Promise<string> => {
     const prompt = getExpandDetailedSynopsisPrompt(summary);
     try {
         return await callAI(
             [{ role: 'user', content: prompt }],
-            model
+            model,
+            { creativityLevel: creativityLevel }
         );
     } catch (e) {
         handleApiError(e);
@@ -956,16 +1033,17 @@ export const expandDetailedSynopsis = async (
 
 export const organizeWorldviewFromChat = async (
     chatText: string,
-    model: string = 'gemini-3-flash-preview'
+    model: string = 'gemini-3-flash-preview',
+    creativityLevel: number = 7
 ): Promise<WorldItem[]> => {
     const prompt = getOrganizeWorldviewPrompt(chatText);
     try {
-        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         const responseText = await callAI(
             [{ role: 'user', content: prompt }],
-            effectiveModel,
+            model,
             {
-                responseMimeType: 'application/json'
+                responseMimeType: 'application/json',
+                creativityLevel: creativityLevel
             }
         );
         if (responseText) {
@@ -982,10 +1060,9 @@ export const extractCharacterFromChat = async (
 ): Promise<CharacterProfile | null> => {
     const prompt = getExtractCharacterPrompt(chatText);
     try {
-        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         const responseText = await callAI(
             [{ role: 'user', content: prompt }],
-            effectiveModel,
+            model,
             {
                 responseMimeType: 'application/json'
             }
@@ -1001,10 +1078,9 @@ export const analyzeWritingStyle = async (
 ): Promise<string> => {
     const prompt = getWritingStyleAnalysisPrompt(text);
     try {
-        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         return await callAI(
             [{ role: 'user', content: prompt }],
-            effectiveModel
+            model
         );
     } catch (e) {
         handleApiError(e);
@@ -1027,14 +1103,13 @@ export const generateProjectAssistantResponse = async (
     const prompt = getProjectAssistantPrompt(context, query);
     
     try {
-        const effectiveModel = model === 'gemini-3-flash-preview' ? currentGlobalModel : model;
         return await callAI(
             [
                 { role: 'system', content: "You are a helpful writing assistant for NovelCraft." },
                 ...history.map(m => ({ role: m.role === 'model' ? 'assistant' : m.role, content: m.text })),
                 { role: 'user', content: prompt }
             ],
-            effectiveModel
+            model
         );
     } catch (e) {
         handleApiError(e);

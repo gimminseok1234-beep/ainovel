@@ -1,9 +1,11 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Project, SavedStory, RefinedSynopsisCard, NovelSettings } from '../types.ts';
-import { X, Wand2, FileText, RefreshCw, Save, ArrowRight, Edit2, Check, Sparkles, Info, BookOpenCheck, AlertTriangle, CheckCircle2, RefreshCcw, FolderPlus, Upload, Flame, ToggleLeft, ToggleRight, AlignJustify, Cpu } from 'lucide-react';
-import { refineSynopsisWithContext, refineText, analyzeProjectContext, analyzeSynopsisReference, AI_MODELS, isGrokModel, isMagnumModel } from '../services/geminiService.ts';
+import { X, Wand2, FileText, RefreshCw, Save, ArrowRight, Edit2, Check, Sparkles, Info, BookOpenCheck, AlertTriangle, CheckCircle2, RefreshCcw, FolderPlus, Upload, Flame, ToggleLeft, ToggleRight, AlignJustify, Cpu, Copy } from 'lucide-react';
+import { refineSynopsisWithContext, refineSynopsisStream, refineText, analyzeProjectContext, analyzeSynopsisReference, AI_MODELS, isGrokModel, isMagnumModel } from '../services/geminiService.ts';
 import InputDialog from './InputDialog.tsx';
+import ReactMarkdown from 'react-markdown';
+import remarkBreaks from 'remark-breaks';
 
 interface SynopsisRefinerProps {
   isOpen: boolean;
@@ -33,6 +35,7 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isContextAnalyzing, setIsContextAnalyzing] = useState(false);
   const [refinedCards, setRefinedCards] = useState<RefinedSynopsisCard[]>([]);
+  const [streamingResult, setStreamingResult] = useState('');
   
   // Card Edit State
   const [editingCardIndex, setEditingCardIndex] = useState<number | null>(null);
@@ -158,24 +161,27 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
     if (!rawSynopsis.trim()) return alert("시놉시스 내용을 입력해주세요.");
     
     setIsAnalyzing(true);
+    setStreamingResult('');
+    setRefinedCards([]); // Clear old cards
+    
     try {
       const recentStories = selectedProjectId 
         ? stories.filter(s => s.projectId === selectedProjectId && s.category !== 'synopsis')
         : [];
       
-      // Pass the cached analysis if available
       const preAnalyzedContext = activeProject?.contextAnalysis;
 
-      const result = await refineSynopsisWithContext(
+      await refineSynopsisStream(
           rawSynopsis, 
           activeProject || null, 
-          recentStories, 
+          recentStories,
+          (chunk) => setStreamingResult(prev => prev + chunk),
           preAnalyzedContext,
-          "", // referenceAnalysis removed
-          1, // targetChapterCount removed, default to 1
-          selectedModel // Pass selected model
+          "", 
+          1, 
+          selectedModel, 
+          settings.creativityLevel || 7
       );
-      setRefinedCards(result);
     } catch (e) {
       console.error(e);
       alert("분석 중 오류가 발생했습니다.");
@@ -191,7 +197,8 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
       const refinedSummary = await refineText(
           card.summary, 
           "Make this summary more detailed, include sensory details, and merge any technical instructions into the narrative.",
-          selectedModel
+          selectedModel,
+          settings.creativityLevel || 7
       );
       
       const newCards = [...refinedCards];
@@ -210,22 +217,44 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
     onSaveCard(`${card.chapter}화. ${card.title} (Blueprint)`, content, "", projectId);
   };
 
+  const handleSaveStreamingResult = (projectId: string) => {
+    if (!streamingResult) return;
+    const title = activeProject ? `${activeProject.name} 정제된 설계도` : "정제된 원고 설계도";
+    onSaveCard(title, streamingResult, "", projectId);
+  };
+
   const handleSaveAllClick = () => {
       if (!selectedProjectId) {
           setCreateProjectDialog(true);
           return;
       }
-      if (confirm(`현재 선택된 '${activeProject?.name}' 프로젝트에 ${refinedCards.length}개의 시놉시스를 저장하시겠습니까?`)) {
-          refinedCards.forEach(card => handleSaveToLibrary(card, selectedProjectId));
-          alert("모두 저장되었습니다.");
+      
+      if (streamingResult) {
+          if (confirm(`현재 선택된 '${activeProject?.name}' 프로젝트에 정제된 설계도를 저장하시겠습니까?`)) {
+              handleSaveStreamingResult(selectedProjectId);
+              alert("저장되었습니다.");
+          }
+          return;
+      }
+
+      if (refinedCards.length > 0) {
+          if (confirm(`현재 선택된 '${activeProject?.name}' 프로젝트에 ${refinedCards.length}개의 시놉시스를 저장하시겠습니까?`)) {
+              refinedCards.forEach(card => handleSaveToLibrary(card, selectedProjectId));
+              alert("모두 저장되었습니다.");
+          }
       }
   };
 
   const handleCreateAndSaveAll = (projectName: string) => {
       const newId = onCreateProject(projectName);
       if (newId && typeof newId === 'string') {
-          refinedCards.forEach(card => handleSaveToLibrary(card, newId));
-          alert(`새 프로젝트 '${projectName}'에 ${refinedCards.length}개의 시놉시스가 저장되었습니다.`);
+          if (streamingResult) {
+              handleSaveStreamingResult(newId);
+              alert(`새 프로젝트 '${projectName}'에 정제된 설계도가 저장되었습니다.`);
+          } else {
+              refinedCards.forEach(card => handleSaveToLibrary(card, newId));
+              alert(`새 프로젝트 '${projectName}'에 ${refinedCards.length}개의 시놉시스가 저장되었습니다.`);
+          }
           setSelectedProjectId(newId);
       }
       setCreateProjectDialog(false);
@@ -278,7 +307,7 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
                       onChange={(e) => setSelectedProjectId(e.target.value)}
                    >
                       <option value="">(프로젝트 선택 안 함)</option>
-                      {projects.map(p => (
+                      {(Array.isArray(projects) ? projects : []).map(p => (
                          <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
                    </select>
@@ -323,16 +352,22 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
                         <Sparkles size={14} className="text-blue-400" /> 분석 모델 선택
                     </label>
                     <div className="grid grid-cols-1 gap-2">
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-3 gap-2">
                             <button 
                                 onClick={() => setSelectedModel('gemini-3-flash-preview')}
-                                className={`py-2 rounded-lg border text-xs font-bold transition-all ${selectedModel === 'gemini-3-flash-preview' ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/20' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
+                                className={`py-2 rounded-lg border text-[10px] font-bold transition-all ${selectedModel === 'gemini-3-flash-preview' ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/20' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
                             >
                                 Gemini 3 Flash
                             </button>
                             <button 
+                                onClick={() => setSelectedModel('gemini-2.5-pro-preview')}
+                                className={`py-2 rounded-lg border text-[10px] font-bold transition-all ${selectedModel === 'gemini-2.5-pro-preview' ? 'bg-green-600 border-green-500 text-white shadow-lg shadow-green-500/20' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
+                            >
+                                Gemini 2.5 Pro
+                            </button>
+                            <button 
                                 onClick={() => setSelectedModel('gemini-3.1-pro-preview')}
-                                className={`py-2 rounded-lg border text-xs font-bold transition-all ${selectedModel === 'gemini-3.1-pro-preview' ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-500/20' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
+                                className={`py-2 rounded-lg border text-[10px] font-bold transition-all ${selectedModel === 'gemini-3.1-pro-preview' ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-500/20' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
                             >
                                 Gemini 3.1 Pro
                             </button>
@@ -354,6 +389,7 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
                     </div>
                     <p className="text-[10px] text-gray-500 mt-2">
                         {selectedModel === 'gemini-3-flash-preview' && "빠르고 가벼운 분석에 적합합니다."}
+                        {selectedModel === 'gemini-2.5-pro-preview' && "성능과 속도의 균형이 뛰어난 최신 프로 모델입니다."}
                         {selectedModel === 'gemini-3.1-pro-preview' && "더 깊고 정교한 논리적 분석이 가능합니다."}
                         {selectedModel === 'grok-3' && "강력한 추론 능력으로 복잡한 설정을 정교하게 다듬습니다."}
                         {selectedModel === 'anthracite-org/magnum-v4-72b' && "문학적 표현과 창의적인 묘사가 뛰어난 모델입니다."}
@@ -386,106 +422,134 @@ const SynopsisRefiner: React.FC<SynopsisRefinerProps> = ({
              </div>
           </div>
 
-          {/* RIGHT: Output Cards */}
+          {/* RIGHT: Output Area */}
           <div className="flex-1 bg-[#121212] p-6 overflow-y-auto custom-scrollbar relative">
-             {refinedCards.length === 0 ? (
+             {!streamingResult && refinedCards.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-gray-600 opacity-50">
                    <FileText size={64} className="mb-4" />
                    <p className="text-lg">왼쪽에서 시놉시스를 입력하고 분석을 시작하세요.</p>
                 </div>
              ) : (
                 <div className="max-w-3xl mx-auto space-y-6 pb-20">
-                   <div className="flex items-center justify-between mb-4">
+                   <div className="flex items-center justify-between mb-4 sticky top-0 bg-[#121212] py-2 z-10 border-b border-gray-800/50">
                       <h3 className="text-lg font-bold text-gray-200 flex items-center gap-2">
-                         <FileText className="text-purple-500"/> 정제된 원고 설계도 ({refinedCards.length}개)
+                         <Sparkles className="text-purple-500" size={20}/> 정제된 원고 설계도
                       </h3>
-                      {/* Save All Button */}
-                      <button 
-                        onClick={handleSaveAllClick}
-                        className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold shadow-lg flex items-center gap-2 transition-all hover:scale-105"
-                      >
-                          <Save size={16} /> 
-                          {selectedProjectId ? "전체 저장" : "새 프로젝트에 전체 저장"}
-                      </button>
-                   </div>
-
-                   {refinedCards.map((card, idx) => (
-                      <div key={idx} className="bg-[#1e1e1e] border border-gray-700 rounded-xl overflow-hidden shadow-lg hover:border-purple-500/50 transition-colors group">
-                         {/* Card Header */}
-                         <div className="p-4 bg-[#252525] border-b border-gray-700 flex justify-between items-center">
-                            {editingCardIndex === idx && editForm ? (
-                                <div className="flex-1 flex gap-2 mr-4">
-                                    <input 
-                                        className="w-16 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-white text-center"
-                                        value={editForm.chapter}
-                                        type="number"
-                                        onChange={(e) => setEditForm({...editForm, chapter: parseInt(e.target.value)})}
-                                    />
-                                    <input 
-                                        className="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-white font-bold"
-                                        value={editForm.title}
-                                        onChange={(e) => setEditForm({...editForm, title: e.target.value})}
-                                    />
-                                </div>
-                            ) : (
-                                <div>
-                                    <span className="text-xs font-bold text-purple-400 uppercase tracking-wider">Chapter {card.chapter}</span>
-                                    <h4 className="font-bold text-gray-100 text-lg">{card.title}</h4>
-                                </div>
-                            )}
-                            
-                            <div className="flex gap-1">
-                               {editingCardIndex === idx ? (
-                                   <button onClick={saveEditing} className="p-2 bg-green-600 hover:bg-green-500 text-white rounded-lg"><Check size={16}/></button>
-                               ) : (
-                                   <button onClick={() => startEditing(idx, card)} className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg"><Edit2 size={16}/></button>
-                               )}
-                            </div>
-                         </div>
-
-                         {/* Card Body */}
-                         <div className="p-5 space-y-4">
-                            <div>
-                               <label className="text-xs font-bold text-gray-500 mb-1 block">줄거리 (Summary)</label>
-                               {editingCardIndex === idx && editForm ? (
-                                   <textarea 
-                                      className="w-full h-40 bg-gray-800 border border-gray-600 rounded p-3 text-sm text-gray-200 outline-none resize-none custom-scrollbar"
-                                      value={editForm.summary}
-                                      onChange={(e) => setEditForm({...editForm, summary: e.target.value})}
-                                   />
-                               ) : (
-                                   <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">{card.summary}</p>
-                               )}
-                            </div>
-                            
-                            {/* REMOVED INSTRUCTIONS SECTION */}
-                         </div>
-
-                         {/* Card Footer */}
-                         <div className="p-3 bg-[#252525] border-t border-gray-700 flex justify-end gap-2">
-                            <button 
-                                onClick={() => handleRefineCard(idx, card)}
-                                disabled={isCardRefining === idx || editingCardIndex === idx}
-                                className="px-3 py-1.5 text-xs font-medium text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg flex items-center gap-1 transition-colors disabled:opacity-50"
-                            >
-                                {isCardRefining === idx ? <RefreshCw className="animate-spin" size={12}/> : <Wand2 size={12}/>} AI 더 다듬기
-                            </button>
+                      <div className="flex gap-2">
+                        {streamingResult && (
                             <button 
                                 onClick={() => {
-                                    if(!selectedProjectId) {
-                                        setCreateProjectDialog(true);
-                                    } else {
-                                        handleSaveToLibrary(card, selectedProjectId);
-                                        alert("보관함에 저장되었습니다.");
-                                    }
+                                    navigator.clipboard.writeText(streamingResult);
+                                    alert("클립보드에 복사되었습니다.");
                                 }}
-                                className="px-4 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg flex items-center gap-1 transition-colors shadow-lg"
+                                className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg text-xs font-bold flex items-center gap-2 transition-all"
                             >
-                                <Save size={12}/> 보관함 저장
+                                <Copy size={14} /> 복사
                             </button>
-                         </div>
+                        )}
+                        <button 
+                            onClick={handleSaveAllClick}
+                            className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold shadow-lg flex items-center gap-2 transition-all hover:scale-105"
+                        >
+                            <Save size={16} /> 
+                            {selectedProjectId ? "저장하기" : "새 프로젝트에 저장"}
+                        </button>
                       </div>
-                   ))}
+                   </div>
+
+                   {streamingResult ? (
+                       <div className="bg-[#1e1e1e] border border-gray-700 rounded-2xl p-8 shadow-xl min-h-[500px]">
+                           <div className="prose prose-invert prose-purple max-w-none">
+                               <ReactMarkdown remarkPlugins={[remarkBreaks]}>
+                                   {streamingResult}
+                               </ReactMarkdown>
+                           </div>
+                           {isAnalyzing && (
+                               <div className="mt-4 flex items-center gap-2 text-purple-400 text-sm font-medium animate-pulse">
+                                   <RefreshCw size={14} className="animate-spin" />
+                                   AI가 원고를 작성하고 있습니다...
+                               </div>
+                           )}
+                       </div>
+                   ) : (
+                       (Array.isArray(refinedCards) ? refinedCards : []).map((card, idx) => (
+                          <div key={idx} className="bg-[#1e1e1e] border border-gray-700 rounded-xl overflow-hidden shadow-lg hover:border-purple-500/50 transition-colors group">
+                             {/* Card Header */}
+                             <div className="p-4 bg-[#252525] border-b border-gray-700 flex justify-between items-center">
+                                {editingCardIndex === idx && editForm ? (
+                                    <div className="flex-1 flex gap-2 mr-4">
+                                        <input 
+                                            className="w-16 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-white text-center"
+                                            value={editForm.chapter}
+                                            type="number"
+                                            onChange={(e) => setEditForm({...editForm, chapter: parseInt(e.target.value)})}
+                                        />
+                                        <input 
+                                            className="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-white font-bold"
+                                            value={editForm.title}
+                                            onChange={(e) => setEditForm({...editForm, title: e.target.value})}
+                                        />
+                                    </div>
+                                ) : (
+                                    <div>
+                                        <span className="text-xs font-bold text-purple-400 uppercase tracking-wider">Chapter {card.chapter}</span>
+                                        <h4 className="font-bold text-gray-100 text-lg">{card.title}</h4>
+                                    </div>
+                                )}
+                                
+                                <div className="flex gap-1">
+                                   {editingCardIndex === idx ? (
+                                       <button onClick={saveEditing} className="p-2 bg-green-600 hover:bg-green-500 text-white rounded-lg"><Check size={16}/></button>
+                                   ) : (
+                                       <button onClick={() => startEditing(idx, card)} className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg"><Edit2 size={16}/></button>
+                                   )}
+                                </div>
+                             </div>
+
+                             {/* Card Body */}
+                             <div className="p-5 space-y-4">
+                                <div>
+                                   <label className="text-xs font-bold text-gray-500 mb-1 block">줄거리 (Summary)</label>
+                                   {editingCardIndex === idx && editForm ? (
+                                       <textarea 
+                                          className="w-full h-40 bg-gray-800 border border-gray-600 rounded p-3 text-sm text-gray-200 outline-none resize-none custom-scrollbar"
+                                          value={editForm.summary}
+                                          onChange={(e) => setEditForm({...editForm, summary: e.target.value})}
+                                       />
+                                   ) : (
+                                       <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">{card.summary}</p>
+                                   )}
+                                </div>
+                                
+                                {/* REMOVED INSTRUCTIONS SECTION */}
+                             </div>
+
+                             {/* Card Footer */}
+                             <div className="p-3 bg-[#252525] border-t border-gray-700 flex justify-end gap-2">
+                                <button 
+                                    onClick={() => handleRefineCard(idx, card)}
+                                    disabled={isCardRefining === idx || editingCardIndex === idx}
+                                    className="px-3 py-1.5 text-xs font-medium text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg flex items-center gap-1 transition-colors disabled:opacity-50"
+                                >
+                                    {isCardRefining === idx ? <RefreshCw className="animate-spin" size={12}/> : <Wand2 size={12}/>} AI 더 다듬기
+                                </button>
+                                <button 
+                                    onClick={() => {
+                                        if(!selectedProjectId) {
+                                            setCreateProjectDialog(true);
+                                        } else {
+                                            handleSaveToLibrary(card, selectedProjectId);
+                                            alert("보관함에 저장되었습니다.");
+                                        }
+                                    }}
+                                    className="px-4 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg flex items-center gap-1 transition-colors shadow-lg"
+                                >
+                                    <Save size={12}/> 보관함 저장
+                                </button>
+                             </div>
+                          </div>
+                       ))
+                   )}
                 </div>
              )}
           </div>
