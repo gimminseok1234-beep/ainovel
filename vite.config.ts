@@ -12,8 +12,10 @@ export default defineConfig(({ mode }) => {
       },
       plugins: [react(), tailwindcss()],
       define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+        'process.env.API_KEY': JSON.stringify(env.API_KEY || env.GEMINI_API_KEY || ''),
+        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || env.API_KEY || ''),
+        'process.env.GROK_API_KEY': JSON.stringify(env.GROK_API_KEY || ''),
+        'process.env.MAGNUM_API_KEY': JSON.stringify(env.MAGNUM_API_KEY || env.OPENROUTER_API_KEY || '')
       },
       resolve: {
         alias: {

@@ -1,5 +1,5 @@
 
-// ... existing imports ...
+import { GoogleGenAI } from "@google/genai";
 import { OpenRouter } from '@openrouter/sdk';
 import { NovelSettings, Project, MindMapNode, CharacterRelationship, CharacterProfile, WorldItem, ChapterOutline, StoryDetails, ChatMessage, SavedStory, RefinedSynopsisCard, DEFAULT_SETTINGS } from "../types.ts";
 
@@ -64,8 +64,17 @@ const SAFETY_SETTINGS = [
 let lastErrorTime = 0;
 export const handleApiError = (e: any) => {
     const msg = e?.message || String(e);
+    const now = Date.now();
+    
+    if (msg.includes('leaked') || msg.includes('Leaked')) {
+        if (now - lastErrorTime > 5000) {
+            lastErrorTime = now;
+            alert(`[보안 경고] API 키가 유출된 것으로 보고되었습니다.\n\n해당 API 키는 구글에 의해 비활성화되었습니다. 다음 단계를 따라주세요:\n1. Google AI Studio(aistudio.google.com)에서 새로운 API 키를 생성하세요.\n2. 앱 설정 메뉴에서 새로운 API 키로 업데이트하세요.\n3. 기존 유출된 키는 삭제하거나 비활성화하세요.`);
+        }
+        return;
+    }
+
     if (msg.includes('403') || msg.includes('PERMISSION_DENIED') || msg.includes('forbidden') || msg.includes('Forbidden')) {
-        const now = Date.now();
         if (now - lastErrorTime > 5000) {
             lastErrorTime = now;
             alert(`API 접근 권한 오류(403)가 발생했습니다.\n\n[안내사항]\n1. 입력하신 API 키가 유효한지 확인해주세요.\n2. 해당 API 키에 필요한 권한이 부여되어 있는지 확인해주세요.\n3. 무료 할당량을 초과했거나 결제 정보가 필요한 상태일 수 있습니다.\n4. 특정 국가/지역에서는 API 접근이 제한될 수 있습니다.\n\n상세 오류: ${msg}`);
@@ -117,9 +126,14 @@ const callGrokAPI = async (
   responseMimeType?: string
 ): Promise<string> => {
   try {
-    const effectiveApiKey = (import.meta.env.VITE_GROK_API_KEY || '').trim();
-    if (!effectiveApiKey) {
-      throw new Error("Grok API Key is missing. Please set VITE_GROK_API_KEY in your environment.");
+    let effectiveApiKey = (process.env.GROK_API_KEY || import.meta.env.VITE_GROK_API_KEY || '').trim();
+    
+    // Remove quotes if they were accidentally included
+    if (effectiveApiKey.startsWith('"') && effectiveApiKey.endsWith('"')) effectiveApiKey = effectiveApiKey.slice(1, -1);
+    if (effectiveApiKey.startsWith("'") && effectiveApiKey.endsWith("'")) effectiveApiKey = effectiveApiKey.slice(1, -1);
+
+    if (!effectiveApiKey || effectiveApiKey === "YOUR_GROK_API_KEY" || effectiveApiKey === "undefined" || effectiveApiKey === "null") {
+      throw new Error("Grok API Key is missing. Please set GROK_API_KEY in your environment.");
     }
     const effectiveModel = model || 'grok-3';
 
@@ -205,9 +219,14 @@ const callMagnumAPI = async (
   temperature: number = 0.7
 ): Promise<string> => {
   try {
-    const effectiveApiKey = (import.meta.env.VITE_MAGNUM_API_KEY || '').trim();
-    if (!effectiveApiKey) {
-      throw new Error("Magnum API Key is missing. Please set VITE_MAGNUM_API_KEY in your environment.");
+    let effectiveApiKey = (process.env.MAGNUM_API_KEY || import.meta.env.VITE_MAGNUM_API_KEY || '').trim();
+    
+    // Remove quotes if they were accidentally included
+    if (effectiveApiKey.startsWith('"') && effectiveApiKey.endsWith('"')) effectiveApiKey = effectiveApiKey.slice(1, -1);
+    if (effectiveApiKey.startsWith("'") && effectiveApiKey.endsWith("'")) effectiveApiKey = effectiveApiKey.slice(1, -1);
+
+    if (!effectiveApiKey || effectiveApiKey === "YOUR_MAGNUM_API_KEY" || effectiveApiKey === "undefined" || effectiveApiKey === "null") {
+      throw new Error("Magnum API Key is missing. Please set MAGNUM_API_KEY in your environment.");
     }
     const effectiveModel = model || 'anthracite-org/magnum-v4-72b';
 
@@ -470,79 +489,62 @@ const callGeminiAPI = async (
     config: any,
     onChunk?: (text: string) => void
 ): Promise<string> => {
-    const isStream = !!onChunk;
-    const action = isStream ? "streamGenerateContent?alt=sse" : "generateContent";
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:${action}${isStream ? '&' : '?'}key=${apiKey}`;
-
-    const userMsgs = messages.filter(m => m.role !== 'system');
-    const prompt = userMsgs.map(m => m.content).join("\n\n");
-
-    const body: any = {
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-            temperature: config.temperature || 0.7,
-            maxOutputTokens: config.maxOutputTokens || 8192,
-            responseMimeType: config.responseMimeType
-        },
-        safetySettings: SAFETY_SETTINGS
+    const ai = new GoogleGenAI({ apiKey });
+    
+    const systemInstruction = config.systemInstruction;
+    const generationConfig = {
+        temperature: config.temperature || 0.7,
+        maxOutputTokens: config.maxOutputTokens || 8192,
+        responseMimeType: config.responseMimeType
     };
 
-    if (config.systemInstruction) {
-        body.systemInstruction = {
-            parts: [{ text: config.systemInstruction }]
-        };
-    }
+    // Filter out system messages for the 'contents' part as they go into systemInstruction
+    const userMessages = messages.filter(m => m.role !== 'system');
+    const prompt = userMessages.map(m => m.content).join("\n\n");
 
     notifyModelUsage('Google Gemini', model);
 
-    const response = await fetch(url, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify(body)
-    });
+    try {
+        if (onChunk) {
+            const response = await ai.models.generateContentStream({
+                model,
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                config: {
+                    ...generationConfig,
+                    systemInstruction,
+                    safetySettings: SAFETY_SETTINGS as any
+                }
+            });
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Gemini API Error: ${response.status} ${response.statusText} - ${errorText}`);
-    }
-
-    if (isStream) {
-        if (!response.body) throw new Error("Gemini API response body is empty");
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let fullText = "";
-        let buffer = "";
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
-
-            for (const line of lines) {
-                if (line.trim().startsWith("data: ")) {
-                    const dataStr = line.trim().substring(6);
-                    try {
-                        const data = JSON.parse(dataStr);
-                        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-                        if (text) {
-                            fullText += text;
-                            onChunk(text);
-                        }
-                    } catch (e) {
-                        // Ignore parse errors for incomplete chunks
-                    }
+            let fullText = "";
+            for await (const chunk of response) {
+                const text = chunk.text;
+                if (text) {
+                    fullText += text;
+                    onChunk(text);
                 }
             }
+            return fullText;
+        } else {
+            const response = await ai.models.generateContent({
+                model,
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                config: {
+                    ...generationConfig,
+                    systemInstruction,
+                    safetySettings: SAFETY_SETTINGS as any
+                }
+            });
+            return response.text || "";
         }
-        return fullText;
-    } else {
-        const data = await response.json();
-        return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    } catch (e: any) {
+        console.error(`Gemini SDK Error with model ${model}:`, e);
+        // Extract status code if possible for handleApiError
+        const errorMsg = e?.message || String(e);
+        if (errorMsg.includes('403') || errorMsg.includes('PERMISSION_DENIED')) {
+            handleApiError(new Error(`Gemini API Error: 403 Forbidden - ${errorMsg}`));
+        }
+        throw e;
     }
 };
 
@@ -570,9 +572,14 @@ export const callAI = async (
         // Magnum (OpenRouter) does not fallback to Gemini as per user request
         return await callMagnumAPI(messages, model, '', options.onChunk, effectiveTemperature);
     } else {
-        const key = process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || "";
-        if (!key) {
-            throw new Error("Gemini API Key is missing. Please set GEMINI_API_KEY in your environment.");
+        let key = (process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || "").trim();
+        
+        // Remove quotes if they were accidentally included
+        if (key.startsWith('"') && key.endsWith('"')) key = key.slice(1, -1);
+        if (key.startsWith("'") && key.endsWith("'")) key = key.slice(1, -1);
+
+        if (!key || key === "YOUR_GEMINI_API_KEY" || key === "undefined" || key === "null") {
+            throw new Error("Gemini API Key is missing or invalid. Please set GEMINI_API_KEY in your environment settings.");
         }
         
         const systemMsg = messages.find(m => m.role === 'system')?.content;
